@@ -57,3 +57,21 @@ void printIpv4(uint8_t ipv4[])
             putcUart0('.');
     }
 }
+
+void printMac(uint8_t mac[])
+{
+    uint8_t i = 0;
+    for(i = 0; i < 6; i++)
+    {
+        printUint8InHex(mac[i]);
+        if(i != 5)
+            putcUart0(':');
+    }
+}
+
+void copyUint8Array(uint8_t src[], uint8_t dest[], uint8_t size)
+{
+    uint8_t i = 0;
+    for(i = 0; i < size; i++)
+        dest[i] = src[i];
+}

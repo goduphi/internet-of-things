@@ -63,6 +63,7 @@
 #include "eeprom.h"
 #include "cli.h"
 #include "utils.h"
+#include "tcp.h"
 
 // Pins
 #define RED_LED PORTF,1
@@ -97,6 +98,67 @@ void initHw()
 // Ether frame header (18) + Max MTU (1500) + CRC (4)
 #define MAX_PACKET_SIZE 1522
 
+void displayConnectionInfo()
+{
+    uint8_t i;
+    char str[10];
+    uint8_t mac[6];
+    uint8_t ip[4];
+    etherGetMacAddress(mac);
+    putsUart0("HW: ");
+    for (i = 0; i < 6; i++)
+    {
+        sprintf(str, "%02x", mac[i]);
+        putsUart0(str);
+        if (i < 6-1)
+            putcUart0(':');
+    }
+    putcUart0('\n');
+    etherGetIpAddress(ip);
+    putsUart0("IP: ");
+    for (i = 0; i < 4; i++)
+    {
+        sprintf(str, "%u", ip[i]);
+        putsUart0(str);
+        if (i < 4-1)
+            putcUart0('.');
+    }
+    if (etherIsDhcpEnabled())
+        putsUart0(" (dhcp)");
+    else
+        putsUart0(" (static)");
+    putcUart0('\n');
+    etherGetIpSubnetMask(ip);
+    putsUart0("SN: ");
+    for (i = 0; i < 4; i++)
+    {
+        sprintf(str, "%u", ip[i]);
+        putsUart0(str);
+        if (i < 4-1)
+            putcUart0('.');
+    }
+    putcUart0('\n');
+    etherGetIpGatewayAddress(ip);
+    putsUart0("GW: ");
+    for (i = 0; i < 4; i++)
+    {
+        sprintf(str, "%u", ip[i]);
+        putsUart0(str);
+        if (i < 4-1)
+            putcUart0('.');
+    }
+    putcUart0('\n');
+    if (etherIsLinkUp())
+        putsUart0("Link is up\n");
+    else
+        putsUart0("Link is down\n");
+}
+
+void showHelp()
+{
+
+}
+
 int main(void)
 {
     // Init controller
@@ -109,55 +171,81 @@ int main(void)
     // This code was directly taken from the ethernet example done in class
     // Init ethernet interface (eth0)
     putsUart0("\nStarting eth0\n");
-    /*
     etherSetMacAddress(2, 3, 4, 5, 6, 101);
     etherDisableDhcpMode();
-    etherSetIpAddress(192, 168, 1, 198);
+    etherSetIpAddress(192, 168, 2, 101);
     etherSetIpSubnetMask(255, 255, 255, 0);
     etherSetIpGatewayAddress(192, 168, 1, 1);
     etherInit(ETHER_UNICAST | ETHER_BROADCAST | ETHER_HALFDUPLEX);
     waitMicrosecond(100000);
+    displayConnectionInfo();
 
     // Flash LED
     setPinValue(GREEN_LED, 1);
     waitMicrosecond(100000);
     setPinValue(GREEN_LED, 0);
     waitMicrosecond(100000);
-    */
 
     uint8_t buffer[MAX_PACKET_SIZE];
+    etherHeader* etherData = (etherHeader*)buffer;
 
-    USER_DATA data;
-
+    USER_DATA userData;
     uint8_t ipv4Buffer[4];
+    uint8_t serverMacLocalCopy[6];
+
     // Endless loop
     while(true)
     {
-        putsUart0("\nmqtt> ");
-        getsUart0(&data);
-        parseField(&data);
-
-        if(isCommand(&data, "set", 2))
+        if (kbhitUart0())
         {
-            if(stringCompare("MQTT", getFieldString(&data, 1)))
+            getsUart0(&userData);
+            parseField(&userData);
+
+            if(isCommand(&userData, "set", 2))
             {
-                if(isIpv4Address(&data, 1))
+                if(stringCompare("MQTT", getFieldString(&userData, 1)))
                 {
-                    // Save the MQTT IPv4 address
-                    uint32_t ipv4Address = getIpv4Address(&data, 1);
-                    writeEeprom(PROJECT_META_DATA + 1, ipv4Address);
+                    if(isIpv4Address(&userData, 1))
+                    {
+                        // Save the MQTT IPv4 address
+                        uint32_t ipv4Address = getIpv4Address(&userData, 1);
+                        writeEeprom(PROJECT_META_DATA + 1, ipv4Address);
+                    }
+                    else
+                        putsUart0("<www.xxx.yyy.zzz>\n");
                 }
-                else
-                    putsUart0("Format: www.xxx.yyy.zzz, where the maximum value can be 255\n");
+            }
+
+            if(isCommand(&userData, "status", 0))
+            {
+                uint32_t mqttIpv4Address = readEeprom(PROJECT_META_DATA + 1);
+                convertEncodedIpv4ToArray(ipv4Buffer, ipv4Address);
+                putsUart0("MQTT IP: ");
+                printIpv4(ipv4Buffer);
+                putcUart0('\n');
+                putsUart0("MQTT Broker MAC: ");
+                printMac(serverMacLocalCopy);
+                putcUart0('\n');
+            }
+
+            if(isCommand(&userData, "arp", 0))
+            {
+                // Store the MAC locally
+            }
+
+            if(isCommand(&userData, "connect", 0))
+            {
+                // Send an ARP request to find out what the MAC address of the server is
+                etherSendArpRequest(etherData, ipv4Buffer);
             }
         }
 
-        if(isCommand(&data, "status", 0))
+        if(etherIsDataAvailable())
         {
-            uint32_t mqttIpv4Address = readEeprom(PROJECT_META_DATA + 1);
-            convertEncodedIpv4ToArray(ipv4Buffer, mqttIpv4Address);
-            printIpv4(ipv4Buffer);
-            putcUart0('\n');
+            // This is just a test for now
+            // Get packet
+            etherGetPacket(etherData, MAX_PACKET_SIZE);
+            copyUint8Array(etherData->sourceAddress, serverMacLocalCopy, 6);
         }
     }
 }

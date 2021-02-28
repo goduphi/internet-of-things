@@ -80,6 +80,43 @@ void printUint8InDecimal(uint8_t n)
     }
 }
 
+void printUint8InHex(uint8_t n)
+{
+    // Print 4 bits at a time
+    int8_t i = 0;
+    for(i = 1; i >= 0; i--)
+    {
+        uint8_t currentNumber = (n >> (i << 2)) & 0xF;
+        if(currentNumber > 9)
+        {
+            switch(currentNumber)
+            {
+            case 10:
+                putcUart0('a');
+                break;
+            case 11:
+                putcUart0('b');
+                break;
+            case 12:
+                putcUart0('c');
+                break;
+            case 13:
+                putcUart0('d');
+                break;
+            case 14:
+                putcUart0('e');
+                break;
+            case 15:
+                putcUart0('f');
+                break;
+            }
+        }
+        else
+            printUint8InDecimal(currentNumber);
+    }
+
+}
+
 // Tokenizes the string in place
 void parseField(USER_DATA* data)
 {

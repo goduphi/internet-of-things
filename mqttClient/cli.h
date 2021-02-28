@@ -28,6 +28,7 @@ typedef struct _USER_DATA
 
 void getsUart0(USER_DATA* data);
 void printUint8InDecimal(uint8_t n);
+void printUint8InHex(uint8_t n);
 void parseField(USER_DATA* data);
 bool isCommand(USER_DATA* data, const char strCommand[], uint8_t minArguments);
 int32_t getFieldInteger(USER_DATA* data, uint8_t fieldNumber);
