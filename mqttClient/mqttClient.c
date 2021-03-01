@@ -98,65 +98,8 @@ void initHw()
 // Ether frame header (18) + Max MTU (1500) + CRC (4)
 #define MAX_PACKET_SIZE 1522
 
-void displayConnectionInfo()
-{
-    uint8_t i;
-    char str[10];
-    uint8_t mac[6];
-    uint8_t ip[4];
-    etherGetMacAddress(mac);
-    putsUart0("HW: ");
-    for (i = 0; i < 6; i++)
-    {
-        sprintf(str, "%02x", mac[i]);
-        putsUart0(str);
-        if (i < 6-1)
-            putcUart0(':');
-    }
-    putcUart0('\n');
-    etherGetIpAddress(ip);
-    putsUart0("IP: ");
-    for (i = 0; i < 4; i++)
-    {
-        sprintf(str, "%u", ip[i]);
-        putsUart0(str);
-        if (i < 4-1)
-            putcUart0('.');
-    }
-    if (etherIsDhcpEnabled())
-        putsUart0(" (dhcp)");
-    else
-        putsUart0(" (static)");
-    putcUart0('\n');
-    etherGetIpSubnetMask(ip);
-    putsUart0("SN: ");
-    for (i = 0; i < 4; i++)
-    {
-        sprintf(str, "%u", ip[i]);
-        putsUart0(str);
-        if (i < 4-1)
-            putcUart0('.');
-    }
-    putcUart0('\n');
-    etherGetIpGatewayAddress(ip);
-    putsUart0("GW: ");
-    for (i = 0; i < 4; i++)
-    {
-        sprintf(str, "%u", ip[i]);
-        putsUart0(str);
-        if (i < 4-1)
-            putcUart0('.');
-    }
-    putcUart0('\n');
-    if (etherIsLinkUp())
-        putsUart0("Link is up\n");
-    else
-        putsUart0("Link is down\n");
-}
-
 void showHelp()
 {
-
 }
 
 int main(void)
@@ -178,7 +121,6 @@ int main(void)
     etherSetIpGatewayAddress(192, 168, 1, 1);
     etherInit(ETHER_UNICAST | ETHER_BROADCAST | ETHER_HALFDUPLEX);
     waitMicrosecond(100000);
-    displayConnectionInfo();
 
     // Flash LED
     setPinValue(GREEN_LED, 1);
@@ -219,7 +161,7 @@ int main(void)
             if(isCommand(&userData, "status", 0))
             {
                 uint32_t mqttIpv4Address = readEeprom(PROJECT_META_DATA + 1);
-                convertEncodedIpv4ToArray(ipv4Buffer, ipv4Address);
+                convertEncodedIpv4ToArray(ipv4Buffer, mqttIpv4Address);
                 putsUart0("MQTT IP: ");
                 printIpv4(ipv4Buffer);
                 putcUart0('\n');
@@ -230,13 +172,25 @@ int main(void)
 
             if(isCommand(&userData, "arp", 0))
             {
-                // Store the MAC locally
             }
 
             if(isCommand(&userData, "connect", 0))
             {
                 // Send an ARP request to find out what the MAC address of the server is
                 etherSendArpRequest(etherData, ipv4Buffer);
+            }
+
+            if(isCommand(&userData, "tcp", 0))
+            {
+                socket source;
+                etherGetIpAddress(source.ip);
+                source.port = 0;
+                etherGetMacAddress(source.mac);
+                socket dest;
+                copyUint8Array(ipv4Buffer, dest.ip, 4);
+                dest.port = 1883;
+                copyUint8Array(serverMacLocalCopy, dest.mac, 6);
+                sendTcp(etherData, &source, &dest, 0x5000 | 0x0002);
             }
         }
 
@@ -245,6 +199,9 @@ int main(void)
             // This is just a test for now
             // Get packet
             etherGetPacket(etherData, MAX_PACKET_SIZE);
+
+            // Add an error message here if we do not receive an arp response
+            // Store the MAC address locally
             copyUint8Array(etherData->sourceAddress, serverMacLocalCopy, 6);
         }
     }
