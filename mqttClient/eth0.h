@@ -152,6 +152,10 @@ bool etherIsOverflow();
 uint16_t etherGetPacket(etherHeader *ether, uint16_t maxSize);
 bool etherPutPacket(etherHeader *ether, uint16_t size);
 
+void etherSumWords(void* data, uint16_t sizeInBytes, uint32_t* sum);
+uint16_t getEtherChecksum(uint32_t sum);
+void etherCalcIpChecksum(ipHeader *ip);
+
 bool etherIsIp(etherHeader *ether);
 bool etherIsIpUnicast(etherHeader *ether);
 
@@ -181,5 +185,8 @@ void etherGetMacAddress(uint8_t mac[6]);
 
 uint16_t htons(uint16_t value);
 #define ntohs htons
+
+uint32_t htonl(uint32_t value);
+#define ntohl htonl
 
 #endif

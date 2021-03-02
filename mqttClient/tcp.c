@@ -11,7 +11,7 @@
 #include "tcp.h"
 #include "utils.h"
 
-void sendTcp(etherHeader* ether, socket* s, socket* d, uint16_t flags)
+void sendTcp(etherHeader* ether, socket* s, socket* d, uint16_t flags, uint16_t dataLength)
 {
     ipHeader* ip = (ipHeader*)ether->data;
     tcpHeader* tcp = (tcpHeader*)ip->data;
@@ -29,7 +29,6 @@ void sendTcp(etherHeader* ether, socket* s, socket* d, uint16_t flags)
     ip->typeOfService = 0;
     ip->id = 0;
     ip->flagsAndOffset = 0;
-    // Why can I just use time to live like this? Why not big endian?
     ip->ttl = 128;
     ip->protocol = 0x06;                           // TCP has a value of 6
     copyUint8Array(s->ip, ip->sourceIp, 4);
@@ -38,31 +37,35 @@ void sendTcp(etherHeader* ether, socket* s, socket* d, uint16_t flags)
     // Fill up the tcp frame
     tcp->sourcePort = htons(s->port);
     tcp->destPort = htons(d->port);
-    tcp->sequenceNumber = 200;
-    tcp->acknowledgementNumber = 0;
+    tcp->sequenceNumber = htonl(200);
+    tcp->acknowledgementNumber = htonl(0);
     tcp->offsetFields = htons(flags);
     tcp->windowSize = htons(1500);                 // This is just a random size I put in
     tcp->checksum = 0;
     tcp->urgentPointer = 0;
 
     // Calculate all the checksums
+    // The 16 bit checksum includes the Pseudo-Header, TCP Header & TCP data
+    uint32_t sum = 0;
     /*
-     * Pseudo-header of IP
+     * Pseudo-header of IP : 12 bytes
      * Source IP address
      * Destination IP address
      * Zero : Protocol
      * TCP length
      */
-    uint32_t sum = 0;
-    etherSumWords(ip->sourceIp, 4, &sum);
-    etherSumWords(ip->destIp, 4, &sum);
-    uint8_t zero = 0;
-    etherSumWords(&zero, 1, &sum);
-    etherSumWords(ip->protocol, 1, &sum);
-    uint16_t tcpLength = htons(20);               // For now, I am hardcoding the tcp length
+    etherSumWords(ip->sourceIp, 8, &sum);
+    uint16_t zeroProtocol16 = ip->protocol;
+    zeroProtocol16 = htons(zeroProtocol16);
+    etherSumWords(&zeroProtocol16, 2, &sum);
+    // The upper 4 bits of the flags field give us the length of the tcp header
+    uint16_t tcpLength = htons((flags >> 12) << 2);
     etherSumWords(&tcpLength, 2, &sum);
+
+    // There may be data that we need to find the checksum for here
+
     // Sum the words of the TCP header
-    etherSumWords(tcp, 20, &sum);
+    etherSumWords(tcp, ((flags >> 12) << 2) + dataLength, &sum);
     tcp->checksum = getEtherChecksum(sum);
 
     // Calculate the IP checksum now

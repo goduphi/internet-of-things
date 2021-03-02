@@ -534,6 +534,14 @@ uint16_t htons(uint16_t value)
 }
 #define ntohs htons
 
+// This is code that I have added
+uint32_t htonl(uint32_t value)
+{
+    return ((0xFF000000 & value) >> 24) + ((0x00FF0000 & value) >> 8) +
+            ((0x0000FF00 & value) << 8) + ((0x000000FF & value) << 24);
+}
+#define ntohl htonl
+
 // Determines whether packet is IP datagram
 bool etherIsIp(etherHeader *ether)
 {

@@ -190,7 +190,7 @@ int main(void)
                 copyUint8Array(ipv4Buffer, dest.ip, 4);
                 dest.port = 1883;
                 copyUint8Array(serverMacLocalCopy, dest.mac, 6);
-                sendTcp(etherData, &source, &dest, 0x5000 | 0x0002);
+                sendTcp(etherData, &source, &dest, 0x5000 | SYN, 0);
             }
         }
 
