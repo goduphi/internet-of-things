@@ -633,6 +633,23 @@ bool etherIsArpRequest(etherHeader *ether)
     return ok;
 }
 
+// This is code that I have added
+bool etherIsArpResponse(etherHeader* ether)
+{
+    arpPacket *arp = (arpPacket*)ether->data;
+    bool ok;
+    uint8_t i = 0;
+    ok = (ether->frameType == htons(0x0806));
+    while (ok & (i < IP_ADD_LENGTH))
+    {
+        ok = (arp->destIp[i] == ipAddress[i]);
+        i++;
+    }
+    if (ok)
+        ok = (arp->op == htons(2));
+    return ok;
+}
+
 // Sends an ARP response given the request data
 void etherSendArpResponse(etherHeader *ether)
 {

@@ -22,15 +22,8 @@ typedef struct _socket
     uint8_t mac[6];
 } socket;
 
-typedef struct _tcpPseudoHeader
-{
-    uint8_t sourceIp[4];
-    uint8_t destIp[4];
-    uint8_t zero;
-    uint8_t protocol;
-    uint16_t tcpLength;
-} tcpPseudoHeader;
-
-void sendTcp(etherHeader* ether, socket* s, socket* d, uint16_t flags, uint16_t dataLength);
+void sendTcp(etherHeader* ether, socket* s, socket* d, uint16_t flags, uint32_t sequenceNumber, uint32_t acknowledgementNumber,
+             uint8_t options[], uint8_t optionLength, uint16_t dataLength);
+bool etherIsTcp(etherHeader* ether);
 
 #endif /* TCP_H_ */
