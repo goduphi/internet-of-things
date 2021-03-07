@@ -64,16 +64,35 @@
 #include "cli.h"
 #include "utils.h"
 #include "tcp.h"
+#include "mqtt.h"
 
 // Pins
 #define RED_LED PORTF,1
 #define BLUE_LED PORTF,2
 #define GREEN_LED PORTF,3
 
+// Max packet is calculated as:
+// Ether frame header (18) + Max MTU (1500) + CRC (4)
+#define MAX_PACKET_SIZE 1522
+
+typedef enum _state
+{
+    IDLE,
+    SEND_ARP,
+    RECV_ARP,
+    SEND_SYN,
+    RECV_SYN_ACK,
+    CONNECT_MQTT,
+    CONNACK_MQTT
+} state;
+
 // Global variables
 extern bool isCarriageReturn;
 uint32_t seqNum = 200;
 uint32_t ackNum = 0;
+
+uint8_t ipv4Buffer[4];
+uint8_t serverMacLocalCopy[6];
 
 //-----------------------------------------------------------------------------
 // Subroutines                
@@ -95,26 +114,23 @@ void initHw()
     selectPinPushPullOutput(BLUE_LED);
 }
 
-//-----------------------------------------------------------------------------
-// Main
-//-----------------------------------------------------------------------------
-
-// Max packet is calculated as:
-// Ether frame header (18) + Max MTU (1500) + CRC (4)
-#define MAX_PACKET_SIZE 1522
-
-typedef enum _state
-{
-    IDLE,
-    SEND_ARP,
-    RECV_ARP,
-    SEND_SYN,
-    RECV_SYN_ACK
-} state;
-
 void showHelp()
 {
 }
+
+void displayInfo()
+{
+    putsUart0("MQTT IP: ");
+    printIpv4(ipv4Buffer);
+    putcUart0('\n');
+    putsUart0("MQTT Broker MAC: ");
+    printMac(serverMacLocalCopy);
+    putcUart0('\n');
+}
+
+//-----------------------------------------------------------------------------
+// Main
+//-----------------------------------------------------------------------------
 
 int main(void)
 {
@@ -146,13 +162,14 @@ int main(void)
     etherHeader* etherData = (etherHeader*)buffer;
 
     USER_DATA userData;
-    uint8_t ipv4Buffer[4];
-    uint8_t serverMacLocalCopy[6];
 
     // Get the IP address from the EEPROM
+    // The default EEPROM value is 0xFFFFFFFF
     uint32_t mqttIpv4Address = readEeprom(PROJECT_META_DATA + 1);
     if(mqttIpv4Address != 0xFFFFFFFF)
         convertEncodedIpv4ToArray(ipv4Buffer, mqttIpv4Address);
+    else
+        putsUart0("The IP needs to be set before connecting!\n");
 
     // These are here for testing purposes
     socket source;
@@ -165,19 +182,22 @@ int main(void)
     copyUint8Array(ipv4Buffer, dest.ip, 4);
     dest.port = 1883;
 
-    state currentState = IDLE;
-    bool connect = false;
-
     /*
      * Followed RFC793
      * Only send during the initial SYN message
      * Kind = 2 for Maximum Segment Size
      * Length = 4
-     * data = 1460 (0x05B4) MSB first
+     * data = 1460 (0x05B4) - MSB first
      * At the end include 0 to signify end of option
      */
     uint8_t optionsLength = 4;
     uint8_t options[] = {0x02, 0x04, 0x05, 0xB4, 0x00};
+
+    // Variables for the state machine
+    state currentState = IDLE;
+    bool connect = false;
+    ipHeader* recevedIpHeader = (ipHeader*)etherData->data;
+    tcpHeader* recevedTcpHeader = (tcpHeader*)recevedIpHeader->data;
 
     // Endless loop
     while(true)
@@ -199,83 +219,99 @@ int main(void)
                         if(isIpv4Address(&userData, 1))
                         {
                             // Save the MQTT IPv4 address
-                            uint32_t ipv4Address = getIpv4Address(&userData, 1);
-                            writeEeprom(PROJECT_META_DATA + 1, ipv4Address);
+                            mqttIpv4Address = getIpv4Address(&userData, 1);
+                            writeEeprom(PROJECT_META_DATA + 1, mqttIpv4Address);
                         }
                         else
-                            putsUart0("<www.xxx.yyy.zzz>\n");
+                            putsUart0("Format: 255.255.255.255\n");
                     }
                 }
 
                 if(isCommand(&userData, "status", 0))
-                {
-                    putsUart0("MQTT IP: ");
-                    printIpv4(ipv4Buffer);
-                    putcUart0('\n');
-                    putsUart0("MQTT Broker MAC: ");
-                    printMac(serverMacLocalCopy);
-                    putcUart0('\n');
-                }
+                    displayInfo();
 
                 if(isCommand(&userData, "connect", 0))
-                {
                     connect = true;
-                    currentState = SEND_ARP;
-                }
             }
         }
 
         if(connect)
         {
-            // This switch controls the send part of the state machine
-            switch(currentState)
+            connect = false;
+            // Initiate the start of the conversation
+            currentState = SEND_ARP;
+        }
+
+        // This switch controls the send part of the state machine
+        switch(currentState)
+        {
+        case SEND_ARP:
+            // Send an ARP request to find out what the MAC address of the server is
+            etherSendArpRequest(etherData, ipv4Buffer);
+            currentState = RECV_ARP;
+            break;
+        case SEND_SYN:
+            sendTcp(etherData, &source, &dest, 0x6000 | SYN, seqNum, ackNum, options, optionsLength, 0);
+            currentState = RECV_SYN_ACK;
+            break;
+        case CONNECT_MQTT:
             {
-            case SEND_ARP:
-                // Send an ARP request to find out what the MAC address of the server is
-                etherSendArpRequest(etherData, ipv4Buffer);
-                currentState = RECV_ARP;
-                break;
-            case SEND_SYN:
-                sendTcp(etherData, &source, &dest, 0x6000 | SYN, seqNum, ackNum, options, optionsLength, 0);
-                currentState = RECV_SYN_ACK;
-                break;
+                // Assemble the MQTT Packet
+                uint8_t size = 0;
+                assembleMqttConnectPacket(recevedTcpHeader->data, CLEAN_SESSION, "test", 4, &size);
+                sendTcp(etherData, &source, &dest, 0x5000 | PSH | ACK, seqNum, ackNum, 0, 0, size);
+            }
+            currentState = CONNACK_MQTT;
+            break;
+        }
+
+        if(etherIsDataAvailable())
+        {
+            if (etherIsOverflow())
+            {
+                setPinValue(RED_LED, 1);
+                waitMicrosecond(100000);
+                setPinValue(RED_LED, 0);
             }
 
-            if(etherIsDataAvailable())
+            // Get packet
+            etherGetPacket(etherData, MAX_PACKET_SIZE);
+
+            // This switch controls the receive part of the state machine
+            switch(currentState)
             {
-                if (etherIsOverflow())
+            case RECV_ARP:
+                if(etherIsArpResponse(etherData))
                 {
-                    setPinValue(RED_LED, 1);
-                    waitMicrosecond(100000);
-                    setPinValue(RED_LED, 0);
+                    putsUart0("Received an ARP response\n");
+                    copyUint8Array(etherData->sourceAddress, serverMacLocalCopy, 6);
+                    currentState = SEND_SYN;
                 }
-
-                // Get packet
-                etherGetPacket(etherData, MAX_PACKET_SIZE);
-
-                // This switch controls the receive part of the state machine
-                switch(currentState)
+                break;
+            case RECV_SYN_ACK:
+                // Handle IP datagram
+                if(etherIsIp(etherData) && etherIsTcp(etherData))
                 {
-                case RECV_ARP:
-                    if(etherIsArpResponse(etherData))
+                    // Check if SYN, ACK
+                    if((ntohs(recevedTcpHeader->offsetFields) & SYN) && (ntohs(recevedTcpHeader->offsetFields) & ACK))
                     {
-                        putsUart0("Received an ARP response\n");
-                        copyUint8Array(etherData->sourceAddress, serverMacLocalCopy, 6);
-                        currentState = SEND_SYN;
-                    }
-                    break;
-                case RECV_SYN_ACK:
-                    // Handle IP datagram
-                    if(etherIsIp(etherData) && etherIsTcp(etherData))
-                    {
-                        ipHeader* rip = (ipHeader*)etherData->data;
-                        tcpHeader* rtcp = (tcpHeader*)rip->data;
                         seqNum++;
-                        ackNum = ntohl(rtcp->sequenceNumber) + 1;
+                        ackNum = ntohl(recevedTcpHeader->sequenceNumber) + 1;
                         sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
+                        currentState = CONNECT_MQTT;
                     }
-                    break;
+                    else
+                    {
+                        putsUart0("State: RECV_SYN_ACK error\n");
+                    }
                 }
+                break;
+            case CONNACK_MQTT:
+                if(!mqttIsConnack(recevedTcpHeader->data))
+                {
+                    putsUart0("State: MQTT_CONNACK error\n");
+                }
+                break;
             }
         }
     }

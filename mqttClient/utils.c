@@ -75,3 +75,15 @@ void copyUint8Array(uint8_t src[], uint8_t dest[], uint8_t size)
     for(i = 0; i < size; i++)
         dest[i] = src[i];
 }
+
+// Encodes a string as utf-8
+void encodeUtf8(void* packet, uint16_t length, char* string)
+{
+    uint8_t* tmp = (uint8_t*)packet;
+    *(tmp++) = (length >> 8) & 0xFF;
+    *(tmp++) = length & 0xFF;
+    if(length <= 0)
+        return;
+    while(*string)
+        *(tmp++) = *(string++);
+}

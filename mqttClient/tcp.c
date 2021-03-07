@@ -11,6 +11,7 @@
 #include "eth0.h"
 #include "tcp.h"
 #include "utils.h"
+#include "mqtt.h"
 
 // Checks to see if the ip payload is TCP
 bool etherIsTcp(etherHeader* ether)
@@ -48,6 +49,7 @@ void sendTcp(etherHeader* ether, socket* s, socket* d, uint16_t flags, uint32_t 
 {
     ipHeader* ip = (ipHeader*)ether->data;
     tcpHeader* tcp = (tcpHeader*)ip->data;
+    uint8_t* payload = (uint8_t*)tcp->data + optionsLength;
 
     // Fill up the ethernet frame
     copyUint8Array(s->mac, ether->sourceAddress, 6);
@@ -75,7 +77,7 @@ void sendTcp(etherHeader* ether, socket* s, socket* d, uint16_t flags, uint32_t 
     tcp->acknowledgementNumber = htonl(acknowledgementNumber);
     tcp->offsetFields = htons(flags);
     // This is just a random size I put in
-    tcp->windowSize = htons(1460);
+    tcp->windowSize = htons(TCP_WINDOW_SIZE);
     tcp->checksum = 0;
     tcp->urgentPointer = 0;
 
@@ -105,7 +107,6 @@ void sendTcp(etherHeader* ether, socket* s, socket* d, uint16_t flags, uint32_t 
     etherSumWords(&temp16, 2, &sum);
 
     // There may be data that we need to find the checksum for here
-
 
     // Sum the words of the TCP header & data
     etherSumWords(tcp, tcpHeaderLength + dataLength, &sum);
