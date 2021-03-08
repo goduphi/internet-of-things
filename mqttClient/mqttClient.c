@@ -83,7 +83,7 @@ typedef enum _state
     SEND_SYN,
     RECV_SYN_ACK,
     CONNECT_MQTT,
-    CONNACK_MQTT
+    CONNACK_MQTT,
 } state;
 
 // Global variables
@@ -116,6 +116,10 @@ void initHw()
 
 void showHelp()
 {
+    putsUart0("MQTT Client Help Desk!\n");
+    putsUart0("\thelp\t\tshows help menu\n");
+    putsUart0("\tstatus\t\tshows the current IP and MAC of the server\n");
+    putsUart0("\tconnect\t\tconnects to Mosquitto server\n");
 }
 
 void displayInfo()
@@ -198,6 +202,7 @@ int main(void)
     bool connect = false;
     ipHeader* recevedIpHeader = (ipHeader*)etherData->data;
     tcpHeader* recevedTcpHeader = (tcpHeader*)recevedIpHeader->data;
+    uint8_t size = 0;
 
     // Endless loop
     while(true)
@@ -231,6 +236,9 @@ int main(void)
                     displayInfo();
 
                 if(isCommand(&userData, "connect", 0))
+                    showHelp();
+
+                if(isCommand(&userData, "connect", 0))
                     connect = true;
             }
         }
@@ -255,12 +263,8 @@ int main(void)
             currentState = RECV_SYN_ACK;
             break;
         case CONNECT_MQTT:
-            {
-                // Assemble the MQTT Packet
-                uint8_t size = 0;
-                assembleMqttConnectPacket(recevedTcpHeader->data, CLEAN_SESSION, "test", 4, &size);
-                sendTcp(etherData, &source, &dest, 0x5000 | PSH | ACK, seqNum, ackNum, 0, 0, size);
-            }
+            assembleMqttConnectPacket(recevedTcpHeader->data, CLEAN_SESSION, "test", 4, &size);
+            sendTcp(etherData, &source, &dest, 0x5000 | PSH | ACK, seqNum, ackNum, 0, 0, size);
             currentState = CONNACK_MQTT;
             break;
         }
@@ -310,7 +314,12 @@ int main(void)
                 if(!mqttIsConnack(recevedTcpHeader->data))
                 {
                     putsUart0("State: MQTT_CONNACK error\n");
+                    continue;
                 }
+                seqNum += size;
+                ackNum = ntohl(recevedTcpHeader->sequenceNumber) + 1;
+                sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
+                currentState = IDLE;
                 break;
             }
         }

@@ -29,7 +29,7 @@ void assembleMqttConnectPacket(uint8_t* packet, uint8_t flags, char* clientId, u
     variableHeader->connectMessage[3] = 'T';
     // v3.1.1
     variableHeader->protocolLevel = PROTOCOL_LEVEL_V311;
-    variableHeader->connectFlags = htons(flags);
+    variableHeader->connectFlags = flags;
     // For now, a default value of 10s is enough
     variableHeader->keepAlive = htons(10);
 
@@ -40,7 +40,7 @@ void assembleMqttConnectPacket(uint8_t* packet, uint8_t flags, char* clientId, u
 bool mqttIsConnack(uint8_t* packet)
 {
     fixedHeader* mqttFixedHeader = (fixedHeader*)packet;
-    connackVariableHeader* variableHeader = (connackVariableHeader*)mqttFixedHeader->remainingLength;
+    connackVariableHeader* variableHeader = (connackVariableHeader*)(mqttFixedHeader->remainingLength + 1);
     if(mqttFixedHeader->controlHeader != (uint8_t)CONNACK || mqttFixedHeader->remainingLength[0] != 2)
         return false;
     if(variableHeader->connectAcknowledgementFlags != 0 || variableHeader->connectReturnCode != 0)
