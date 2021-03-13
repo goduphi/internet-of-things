@@ -13,9 +13,11 @@
 #include "eth0.h"
 
 #define TCP_WINDOW_SIZE     1460
+
 #define SYN                 0x0002
 #define ACK                 0x0010
 #define PSH                 0x0008
+#define FIN                 0x0001
 
 typedef struct _socket
 {

@@ -23,7 +23,10 @@
 typedef enum _packetType
 {
     MQTT_CONNECT = 0x10,
-    CONNACK = 0x20
+    CONNACK = 0x20,
+    PINGERQ = 0xC0,
+    PINGRESP = 0xD0,
+    DISCONNECT = 0xE0
 } packetType;
 
 typedef struct _fixedHeader
@@ -50,6 +53,9 @@ typedef struct _connackVariableHeader
 } connackVariableHeader;
 
 void assembleMqttConnectPacket(uint8_t* packet, uint8_t flags, char* clientId, uint16_t cliendIdLength, uint8_t* packetLength);
+void assembleMqttPingPacket(uint8_t* packet, uint8_t* packetLength);
+void assembleMqttDisconnectPacket(uint8_t* packet, uint8_t* packetLength);
 bool mqttIsConnack(uint8_t* packet);
+bool mqttIsPingResponse(uint8_t* packet);
 
 #endif /* MQTT_H_ */

@@ -36,6 +36,23 @@ void assembleMqttConnectPacket(uint8_t* packet, uint8_t flags, char* clientId, u
     encodeUtf8(payload, cliendIdLength, clientId);
 }
 
+void assembleMqttPingPacket(uint8_t* packet, uint8_t* packetLength)
+{
+    fixedHeader* mqttFixedHeader = (fixedHeader*)packet;
+    mqttFixedHeader->controlHeader = (uint8_t)PINGERQ;
+    mqttFixedHeader->remainingLength[0] = 0;
+    // This packet only contains the control header length
+    *(packetLength) = 2 + mqttFixedHeader->remainingLength[0];
+}
+
+void assembleMqttDisconnectPacket(uint8_t* packet, uint8_t* packetLength)
+{
+    fixedHeader* mqttFixedHeader = (fixedHeader*)packet;
+    mqttFixedHeader->controlHeader = (uint8_t)DISCONNECT;
+    mqttFixedHeader->remainingLength[0] = 0;
+    // This packet only contains the control header length
+    *(packetLength) = 2 + mqttFixedHeader->remainingLength[0];
+}
 
 bool mqttIsConnack(uint8_t* packet)
 {
@@ -46,4 +63,12 @@ bool mqttIsConnack(uint8_t* packet)
     if(variableHeader->connectAcknowledgementFlags != 0 || variableHeader->connectReturnCode != 0)
         return false;
     return true;
+}
+
+bool mqttIsPingResponse(uint8_t* packet)
+{
+    fixedHeader* mqttFixedHeader = (fixedHeader*)packet;
+    if(mqttFixedHeader->controlHeader == (uint8_t)PINGRESP && mqttFixedHeader->remainingLength[0] == 0)
+        return true;
+    return false;
 }

@@ -84,6 +84,9 @@ typedef enum _state
     RECV_SYN_ACK,
     CONNECT_MQTT,
     CONNACK_MQTT,
+    PINGREQ_MQTT,
+    PINGRESP_MQTT,
+    DISCONNECT_MQTT
 } state;
 
 // Global variables
@@ -116,10 +119,11 @@ void initHw()
 
 void showHelp()
 {
-    putsUart0("MQTT Client Help Desk!\n");
+    putsUart0("\nMQTT Client Help Desk!\n");
     putsUart0("\thelp\t\tshows help menu\n");
     putsUart0("\tstatus\t\tshows the current IP and MAC of the server\n");
     putsUart0("\tconnect\t\tconnects to Mosquitto server\n");
+    putcUart0('\n');
 }
 
 void displayInfo()
@@ -201,7 +205,7 @@ int main(void)
     state currentState = IDLE;
     bool connect = false;
     ipHeader* recevedIpHeader = (ipHeader*)etherData->data;
-    tcpHeader* recevedTcpHeader = (tcpHeader*)recevedIpHeader->data;
+    tcpHeader* receivedTcpHeader = (tcpHeader*)recevedIpHeader->data;
     uint8_t size = 0;
 
     // Endless loop
@@ -235,11 +239,17 @@ int main(void)
                 if(isCommand(&userData, "status", 0))
                     displayInfo();
 
-                if(isCommand(&userData, "connect", 0))
+                if(isCommand(&userData, "help", 0))
                     showHelp();
 
                 if(isCommand(&userData, "connect", 0))
                     connect = true;
+
+                if(isCommand(&userData, "ping", 0))
+                    currentState = PINGREQ_MQTT;
+
+                if(isCommand(&userData, "disconnect", 0))
+                    currentState = DISCONNECT_MQTT;
             }
         }
 
@@ -251,6 +261,7 @@ int main(void)
         }
 
         // This switch controls the send part of the state machine
+        // The requests/sends are always sent with the last known sequence and acknowledgement numbers
         switch(currentState)
         {
         case SEND_ARP:
@@ -263,9 +274,19 @@ int main(void)
             currentState = RECV_SYN_ACK;
             break;
         case CONNECT_MQTT:
-            assembleMqttConnectPacket(recevedTcpHeader->data, CLEAN_SESSION, "test", 4, &size);
+            assembleMqttConnectPacket(receivedTcpHeader->data, CLEAN_SESSION, "test", 4, &size);
             sendTcp(etherData, &source, &dest, 0x5000 | PSH | ACK, seqNum, ackNum, 0, 0, size);
             currentState = CONNACK_MQTT;
+            break;
+        case PINGREQ_MQTT:
+            assembleMqttPingPacket(receivedTcpHeader->data, &size);
+            sendTcp(etherData, &source, &dest, 0x5000 | PSH | ACK, seqNum, ackNum, 0, 0, size);
+            currentState = PINGRESP_MQTT;
+            break;
+        case DISCONNECT_MQTT:
+            assembleMqttDisconnectPacket(receivedTcpHeader->data, &size);
+            sendTcp(etherData, &source, &dest, 0x5000 | PSH | ACK, seqNum, ackNum, 0, 0, size);
+            currentState = PINGRESP_MQTT;
             break;
         }
 
@@ -297,10 +318,10 @@ int main(void)
                 if(etherIsIp(etherData) && etherIsTcp(etherData))
                 {
                     // Check if SYN, ACK
-                    if((ntohs(recevedTcpHeader->offsetFields) & SYN) && (ntohs(recevedTcpHeader->offsetFields) & ACK))
+                    if((ntohs(receivedTcpHeader->offsetFields) & SYN) && (ntohs(receivedTcpHeader->offsetFields) & ACK))
                     {
                         seqNum++;
-                        ackNum = ntohl(recevedTcpHeader->sequenceNumber) + 1;
+                        ackNum = ntohl(receivedTcpHeader->sequenceNumber) + 1;
                         sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
                         currentState = CONNECT_MQTT;
                     }
@@ -311,13 +332,31 @@ int main(void)
                 }
                 break;
             case CONNACK_MQTT:
-                if(!mqttIsConnack(recevedTcpHeader->data))
+                if(!mqttIsConnack(receivedTcpHeader->data))
                 {
                     putsUart0("State: MQTT_CONNACK error\n");
+                    currentState = CONNACK_MQTT;
                     continue;
                 }
+                // IMPORTANT: Add check to make sure sequence number is equal to previous acknowledgement number
+                // Take the size of the previous data sent in bytes and add it to the sequence number
                 seqNum += size;
-                ackNum = ntohl(recevedTcpHeader->sequenceNumber) + 1;
+                // Here, 4 is the size of the connack packet
+                ackNum = ntohl(receivedTcpHeader->sequenceNumber) + 4;
+                sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
+                currentState = IDLE;
+                break;
+            case PINGRESP_MQTT:
+                if(!mqttIsPingResponse(receivedTcpHeader->data))
+                {
+                    putsUart0("State: No ping response\n");
+                    currentState = PINGRESP_MQTT;
+                    continue;
+                }
+                // Take the size of the previous data sent in bytes and add it to the sequence number
+                seqNum += size;
+                // Here, 4 is the size of the connack packet
+                ackNum = ntohl(receivedTcpHeader->sequenceNumber) + 2;
                 sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
                 currentState = IDLE;
                 break;
