@@ -12,6 +12,8 @@
 #include <stdbool.h>
 #include "eth0.h"
 
+#define TIMEOUT_2MS         2000
+
 #define TCP_WINDOW_SIZE     1460
 
 #define SYN                 0x0002

@@ -82,6 +82,11 @@ typedef enum _state
     RECV_ARP,
     SEND_SYN,
     RECV_SYN_ACK,
+    RECV_FIN,
+    SEND_FIN,
+    FIN_WAIT_1,
+    FIN_WAIT_2,
+    CLOSED,
     CONNECT_MQTT,
     CONNACK_MQTT,
     PINGREQ_MQTT,
@@ -285,8 +290,8 @@ int main(void)
             break;
         case DISCONNECT_MQTT:
             assembleMqttDisconnectPacket(receivedTcpHeader->data, &size);
-            sendTcp(etherData, &source, &dest, 0x5000 | PSH | ACK, seqNum, ackNum, 0, 0, size);
-            currentState = PINGRESP_MQTT;
+            sendTcp(etherData, &source, &dest, 0x5000 | PSH | FIN | ACK, seqNum, ackNum, 0, 0, size);
+            currentState = FIN_WAIT_1;
             break;
         }
 
@@ -330,6 +335,52 @@ int main(void)
                         putsUart0("State: RECV_SYN_ACK error\n");
                     }
                 }
+                break;
+            case FIN_WAIT_1:
+                // Handle IP datagram
+                if(etherIsIp(etherData) && etherIsTcp(etherData))
+                {
+                    // Check if this is the ACK of FIN
+                    if(ntohs(receivedTcpHeader->offsetFields) & ACK)
+                    {
+                        currentState = FIN_WAIT_2;
+                    }
+                    else
+                    {
+                        putsUart0("State: FIN_WAIT_1 error\n");
+                    }
+                }
+                break;
+            case FIN_WAIT_2:
+                // Handle IP datagram
+                if(etherIsIp(etherData) && etherIsTcp(etherData))
+                {
+                    // Check if FIN, ACK
+                    if((ntohs(receivedTcpHeader->offsetFields) & FIN) && (ntohs(receivedTcpHeader->offsetFields) & ACK))
+                    {
+                        /* The plus 1 is from page 43 of the RFC793 showing that the sequence number is incremented by 1
+                         * even if no data is sent
+                         */
+                        seqNum += size + 1;
+                        ackNum = ntohl(receivedTcpHeader->sequenceNumber) + 1;
+                        sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
+                        waitMicrosecond(TIMEOUT_2MS);
+                        currentState = CLOSED;
+                    }
+                    else
+                    {
+                        putsUart0("State: FIN_WAIT_2 error\n");
+                    }
+                }
+                break;
+            case CLOSED:
+                // Reset all the variables here
+                ackNum = 0;
+                seqNum = 200;
+                size = 0;
+                connect = false;
+                currentState = IDLE;
+                putsUart0("Connection closed!\n");
                 break;
             case CONNACK_MQTT:
                 if(!mqttIsConnack(receivedTcpHeader->data))
