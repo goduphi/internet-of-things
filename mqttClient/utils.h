@@ -19,5 +19,6 @@ void printIpv4(uint8_t ipv4[]);
 void printMac(uint8_t mac[]);
 void copyUint8Array(uint8_t src[], uint8_t dest[], uint8_t size);
 void encodeUtf8(void* packet, uint16_t length, char* string);
+uint16_t strLen(const char* str);
 
 #endif /* UTILS_H_ */

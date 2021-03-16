@@ -20,10 +20,15 @@
 #define PASSWORD_FLAG           64
 #define USER_NAME_FLAG          128
 
+#define QOS0                    0
+#define QOS1                    2
+#define QOS2                    4
+
 typedef enum _packetType
 {
     MQTT_CONNECT = 0x10,
     CONNACK = 0x20,
+    PUBLISH = 0x30,
     PINGERQ = 0xC0,
     PINGRESP = 0xD0,
     DISCONNECT = 0xE0
@@ -52,9 +57,18 @@ typedef struct _connackVariableHeader
     uint8_t connectReturnCode;
 } connackVariableHeader;
 
-void assembleMqttConnectPacket(uint8_t* packet, uint8_t flags, char* clientId, uint16_t cliendIdLength, uint8_t* packetLength);
-void assembleMqttPingPacket(uint8_t* packet, uint8_t* packetLength);
-void assembleMqttDisconnectPacket(uint8_t* packet, uint8_t* packetLength);
+#define MAX_TOPIC_NAME_LENGTH       80
+
+typedef struct _publishVariableHeader
+{
+    uint16_t topicLength;
+    char topicName[MAX_TOPIC_NAME_LENGTH];
+    uint16_t packetIdentifier;
+} publishVariableHeader;
+
+void assembleMqttConnectPacket(uint8_t* packet, uint8_t flags, char* clientId, uint16_t cliendIdLength, uint16_t* packetLength);
+void assembleMqttPacket(uint8_t* packet, packetType type, uint16_t* packetLength);
+void assembleMqttPublishPacket(uint8_t* packet, char* topicName, uint16_t packetIdentifier, uint8_t qos, char* payload, uint16_t* packetLength);
 bool mqttIsConnack(uint8_t* packet);
 bool mqttIsPingResponse(uint8_t* packet);
 

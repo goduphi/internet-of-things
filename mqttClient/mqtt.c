@@ -11,7 +11,33 @@
 #include "utils.h"
 #include "mqtt.h"
 
-void assembleMqttConnectPacket(uint8_t* packet, uint8_t flags, char* clientId, uint16_t cliendIdLength, uint8_t* packetLength)
+// The offset determines how many byte we have encoded
+uint32_t encodeMqttRemainingLength(uint32_t X, uint8_t* offset)
+{
+    unsigned int encodedByte = 0;
+    uint8_t i = 0;
+    do
+    {
+        encodedByte |= (X % 128) << (i++ << 3);
+        X = X / 128;
+        if(X > 0)
+            encodedByte |= 128;
+        else
+        {
+            *(offset) = i;
+            return encodedByte;
+        }
+    }
+    while(X > 0);
+    return encodedByte;
+}
+
+uint32_t decodeMqttRemainingLength(uint32_t X)
+{
+    return 0;
+}
+
+void assembleMqttConnectPacket(uint8_t* packet, uint8_t flags, char* clientId, uint16_t cliendIdLength, uint16_t* packetLength)
 {
     fixedHeader* mqttFixedHeader = (fixedHeader*)packet;
     connectVariableHeader* variableHeader = (connectVariableHeader*)(mqttFixedHeader->remainingLength + 1);
@@ -36,22 +62,38 @@ void assembleMqttConnectPacket(uint8_t* packet, uint8_t flags, char* clientId, u
     encodeUtf8(payload, cliendIdLength, clientId);
 }
 
-void assembleMqttPingPacket(uint8_t* packet, uint8_t* packetLength)
+void assembleMqttPacket(uint8_t* packet, packetType type, uint16_t* packetLength)
 {
     fixedHeader* mqttFixedHeader = (fixedHeader*)packet;
-    mqttFixedHeader->controlHeader = (uint8_t)PINGERQ;
+    mqttFixedHeader->controlHeader = (uint8_t)type;
     mqttFixedHeader->remainingLength[0] = 0;
     // This packet only contains the control header length
     *(packetLength) = 2 + mqttFixedHeader->remainingLength[0];
 }
 
-void assembleMqttDisconnectPacket(uint8_t* packet, uint8_t* packetLength)
+void assembleMqttPublishPacket(uint8_t* packet, char* topicName, uint16_t packetIdentifier, uint8_t qos, char* payload, uint16_t* packetLength)
 {
+    // For me, a packet identifier of 0 is invalid
+    if(packetIdentifier > 0 && qos < 1)
+    {
+        // Insert some error handling function
+        return;
+    }
+
     fixedHeader* mqttFixedHeader = (fixedHeader*)packet;
-    mqttFixedHeader->controlHeader = (uint8_t)DISCONNECT;
-    mqttFixedHeader->remainingLength[0] = 0;
-    // This packet only contains the control header length
+    mqttFixedHeader->controlHeader = (uint8_t)PUBLISH | qos;
+
+    publishVariableHeader* variableHeader = (publishVariableHeader*)(mqttFixedHeader->remainingLength + 1);
+
+    // Since we are using utf-8 encoding for the payload, we need to add the size of the uint16_t for the length
+    mqttFixedHeader->remainingLength[0] =  sizeof(uint16_t) + strLen(topicName) + sizeof(uint16_t) + strLen(payload);
+
+    // The size of the fixed header plus the remaining length
     *(packetLength) = 2 + mqttFixedHeader->remainingLength[0];
+    encodeUtf8(variableHeader, strLen(topicName), topicName);
+
+    uint8_t* p = (mqttFixedHeader->remainingLength + 1) + (sizeof(uint16_t) + strLen(topicName));
+    encodeUtf8(p, strLen(payload), payload);
 }
 
 bool mqttIsConnack(uint8_t* packet)

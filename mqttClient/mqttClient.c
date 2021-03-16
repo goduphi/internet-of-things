@@ -82,13 +82,15 @@ typedef enum _state
     RECV_ARP,
     SEND_SYN,
     RECV_SYN_ACK,
-    RECV_FIN,
-    SEND_FIN,
     FIN_WAIT_1,
     FIN_WAIT_2,
     CLOSED,
+    // MQTT states
     CONNECT_MQTT,
     CONNACK_MQTT,
+    PUBLISH_MQTT,
+    PUBLISH_QOS0_MQTT,
+    PUBLISH_QOS1_MQTT,
     PINGREQ_MQTT,
     PINGRESP_MQTT,
     DISCONNECT_MQTT
@@ -133,7 +135,7 @@ void showHelp()
 
 void displayInfo()
 {
-    putsUart0("MQTT IP: ");
+    putsUart0("MQTT Server IP: ");
     printIpv4(ipv4Buffer);
     putcUart0('\n');
     putsUart0("MQTT Broker MAC: ");
@@ -207,11 +209,13 @@ int main(void)
     uint8_t options[] = {0x02, 0x04, 0x05, 0xB4, 0x00};
 
     // Variables for the state machine
-    state currentState = IDLE;
-    bool connect = false;
     ipHeader* recevedIpHeader = (ipHeader*)etherData->data;
     tcpHeader* receivedTcpHeader = (tcpHeader*)recevedIpHeader->data;
-    uint8_t size = 0;
+
+    state currentState = IDLE;
+    bool connect = false;
+    // Stores the size of the data payload sent
+    uint16_t size = 0;
 
     // Endless loop
     while(true)
@@ -250,6 +254,9 @@ int main(void)
                 if(isCommand(&userData, "connect", 0))
                     connect = true;
 
+                if(isCommand(&userData, "publish", 2))
+                    currentState = PUBLISH_MQTT;
+
                 if(isCommand(&userData, "ping", 0))
                     currentState = PINGREQ_MQTT;
 
@@ -284,14 +291,28 @@ int main(void)
             currentState = CONNACK_MQTT;
             break;
         case PINGREQ_MQTT:
-            assembleMqttPingPacket(receivedTcpHeader->data, &size);
+            assembleMqttPacket(receivedTcpHeader->data, PINGERQ, &size);
             sendTcp(etherData, &source, &dest, 0x5000 | PSH | ACK, seqNum, ackNum, 0, 0, size);
             currentState = PINGRESP_MQTT;
             break;
         case DISCONNECT_MQTT:
-            assembleMqttDisconnectPacket(receivedTcpHeader->data, &size);
+            assembleMqttPacket(receivedTcpHeader->data, DISCONNECT, &size);
             sendTcp(etherData, &source, &dest, 0x5000 | PSH | FIN | ACK, seqNum, ackNum, 0, 0, size);
             currentState = FIN_WAIT_1;
+            break;
+        case PUBLISH_MQTT:
+            assembleMqttPublishPacket(receivedTcpHeader->data, getFieldString(&userData, 1), 0, 0, getFieldString(&userData, 2), &size);
+            sendTcp(etherData, &source, &dest, 0x5000 | PSH | ACK, seqNum, ackNum, 0, 0, size);
+            currentState = PUBLISH_QOS0_MQTT;
+            break;
+        case CLOSED:
+            // Reset all the variables here
+            putsUart0("Connection closed!\n");
+            ackNum = 0;
+            seqNum = 200;
+            size = 0;
+            connect = false;
+            currentState = IDLE;
             break;
         }
 
@@ -373,15 +394,6 @@ int main(void)
                     }
                 }
                 break;
-            case CLOSED:
-                // Reset all the variables here
-                ackNum = 0;
-                seqNum = 200;
-                size = 0;
-                connect = false;
-                currentState = IDLE;
-                putsUart0("Connection closed!\n");
-                break;
             case CONNACK_MQTT:
                 if(!mqttIsConnack(receivedTcpHeader->data))
                 {
@@ -397,10 +409,15 @@ int main(void)
                 sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
                 currentState = IDLE;
                 break;
+            case PUBLISH_QOS0_MQTT:
+                // IMPORTANT: Add check to make sure sequence number is equal to previous acknowledgement number
+                // Take the size of the previous data sent in bytes and add it to the sequence number
+                seqNum += size;
+                break;
             case PINGRESP_MQTT:
                 if(!mqttIsPingResponse(receivedTcpHeader->data))
                 {
-                    putsUart0("State: No ping response\n");
+                    putsUart0("State: PINGRESP_MQTT -> No ping response\n");
                     currentState = PINGRESP_MQTT;
                     continue;
                 }

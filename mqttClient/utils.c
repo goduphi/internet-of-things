@@ -87,3 +87,11 @@ void encodeUtf8(void* packet, uint16_t length, char* string)
     while(*string)
         *(tmp++) = *(string++);
 }
+
+uint16_t strLen(const char* str)
+{
+    uint8_t i = 0;
+    while(str[i])
+        i++;
+    return i;
+}
