@@ -82,7 +82,7 @@ void encodeUtf8(void* packet, uint16_t length, char* string)
     uint8_t* tmp = (uint8_t*)packet;
     *(tmp++) = (length >> 8) & 0xFF;
     *(tmp++) = length & 0xFF;
-    if(length <= 0)
+    if(length <= 0 || string == 0)
         return;
     while(*string)
         *(tmp++) = *(string++);

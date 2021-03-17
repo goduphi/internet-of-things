@@ -73,7 +73,7 @@
 
 // Max packet is calculated as:
 // Ether frame header (18) + Max MTU (1500) + CRC (4)
-#define MAX_PACKET_SIZE 1522
+#define MAX_PACKET_SIZE         1522
 
 typedef enum _state
 {
@@ -91,6 +91,8 @@ typedef enum _state
     PUBLISH_MQTT,
     PUBLISH_QOS0_MQTT,
     PUBLISH_QOS1_MQTT,
+    SUBSCRIBE_MQTT,
+    SUBACK_MQTT,
     PINGREQ_MQTT,
     PINGRESP_MQTT,
     DISCONNECT_MQTT
@@ -103,6 +105,8 @@ uint32_t ackNum = 0;
 
 uint8_t ipv4Buffer[4];
 uint8_t serverMacLocalCopy[6];
+uint8_t qos = QOS1;
+uint16_t packetIdentifier = 69;
 
 //-----------------------------------------------------------------------------
 // Subroutines                
@@ -257,6 +261,9 @@ int main(void)
                 if(isCommand(&userData, "publish", 2))
                     currentState = PUBLISH_MQTT;
 
+                if(isCommand(&userData, "subscribe", 1))
+                    currentState = SUBSCRIBE_MQTT;
+
                 if(isCommand(&userData, "ping", 0))
                     currentState = PINGREQ_MQTT;
 
@@ -301,9 +308,24 @@ int main(void)
             currentState = FIN_WAIT_1;
             break;
         case PUBLISH_MQTT:
-            assembleMqttPublishPacket(receivedTcpHeader->data, getFieldString(&userData, 1), 0, 0, getFieldString(&userData, 2), &size);
+            assembleMqttPublishPacket(receivedTcpHeader->data, getFieldString(&userData, 1), packetIdentifier, qos, getFieldString(&userData, 2), &size);
             sendTcp(etherData, &source, &dest, 0x5000 | PSH | ACK, seqNum, ackNum, 0, 0, size);
-            currentState = PUBLISH_QOS0_MQTT;
+            switch(qos)
+            {
+            case QOS0:
+                currentState = PUBLISH_QOS0_MQTT;
+                break;
+            case QOS1:
+                currentState = PUBLISH_QOS1_MQTT;
+                break;
+            case QOS2:
+                break;
+            }
+            break;
+        case SUBSCRIBE_MQTT:
+            assembleMqttSubscribePacket(receivedTcpHeader->data, packetIdentifier, getFieldString(&userData, 1), QOS0, &size);
+            sendTcp(etherData, &source, &dest, 0x5000 | PSH | ACK, seqNum, ackNum, 0, 0, size);
+            currentState = SUBACK_MQTT;
             break;
         case CLOSED:
             // Reset all the variables here
@@ -327,6 +349,29 @@ int main(void)
 
             // Get packet
             etherGetPacket(etherData, MAX_PACKET_SIZE);
+
+            if(etherIsArpRequest(etherData))
+                etherSendArpResponse(etherData);
+
+            // Get publish packets
+            if(etherIsIp(etherData) && etherIsTcp(etherData) && mqttIsPublishPacket(receivedTcpHeader->data))
+            {
+                putsUart0("\nReceived new subscription information\n");
+
+                subscription receivedSubscriptionData;
+                getTopicData(receivedTcpHeader->data, &receivedSubscriptionData);
+
+                putsUart0("Topic name: ");
+                putsUart0(receivedSubscriptionData.topicName);
+                putcUart0('\n');
+                putsUart0("Message: ");
+                putsUart0(receivedSubscriptionData.message);
+                putcUart0('\n');
+
+                ackNum = ntohl(receivedTcpHeader->sequenceNumber) + receivedSubscriptionData.remainingLength + 2;
+                sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
+                currentState = IDLE;
+            }
 
             // This switch controls the receive part of the state machine
             switch(currentState)
@@ -413,6 +458,41 @@ int main(void)
                 // IMPORTANT: Add check to make sure sequence number is equal to previous acknowledgement number
                 // Take the size of the previous data sent in bytes and add it to the sequence number
                 seqNum += size;
+                break;
+            case PUBLISH_QOS1_MQTT:
+                if(!mqttIsPuback(receivedTcpHeader->data, packetIdentifier))
+                {
+                    putsUart0("State: PUBLISH_QOS1_MQTT error\n");
+                    currentState = PUBLISH_QOS1_MQTT;
+                    continue;
+                }
+                seqNum += size;
+                // Here, 4 is the size of the puback packet
+                ackNum = ntohl(receivedTcpHeader->sequenceNumber) + 4;
+                sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
+                currentState = IDLE;
+                break;
+            case SUBACK_MQTT:
+                if(!mqttIsSuback(receivedTcpHeader->data, packetIdentifier, 1))
+                {
+                    putsUart0("State: SUBACK_MQTT error\n");
+                    currentState = SUBACK_MQTT;
+                    continue;
+                }
+                uint8_t returnCode = getSubackPayload(receivedTcpHeader->data);
+                if(returnCode == SUBACK_FAILURE)
+                    putsUart0("Error: SUBACK_FAILURE");
+                else
+                {
+                    putsUart0("Maximum QoS granted: ");
+                    printUint8InDecimal(returnCode);
+                    putcUart0('\n');
+                }
+                seqNum += size;
+                // Here, 4 is the size of the puback packet
+                ackNum = ntohl(receivedTcpHeader->sequenceNumber) + 5;
+                sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
+                currentState = IDLE;
                 break;
             case PINGRESP_MQTT:
                 if(!mqttIsPingResponse(receivedTcpHeader->data))
