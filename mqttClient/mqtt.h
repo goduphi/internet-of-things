@@ -13,7 +13,6 @@
 
 #define PROTOCOL_LEVEL_V311     0x04
 
-
 #define MAX_TOPIC_NAME_SIZE     10
 #define MAX_MESSAGE_SIZE        60
 
@@ -37,6 +36,8 @@ typedef enum _packetType
     PUBLISH = 0x30,
     SUBSCRIBE = 0x82,
     SUBACK = 0x90,
+    UNSUBSCRIBE = 0xA2,
+    UNSUBACK = 0xB0,
     PUBACK = 0x40,
     PINGERQ = 0xC0,
     PINGRESP = 0xD0,
@@ -78,12 +79,13 @@ void assembleMqttConnectPacket(uint8_t* packet, uint8_t flags, char* clientId, u
 void assembleMqttPacket(uint8_t* packet, packetType type, uint16_t* packetLength);
 void assembleMqttPublishPacket(uint8_t* packet, char* topicName, uint16_t packetIdentifier, uint8_t qos, char* payload, uint16_t* packetLength);
 void assembleMqttSubscribePacket(uint8_t* packet, uint16_t packetIdentifier, char* topic, uint8_t qos, uint16_t* packetLength);
+void assembleMqttUnsubscribePacket(uint8_t* packet, uint16_t packetIdentifier, char* topic, uint16_t* packetLength);
 void getTopicData(uint8_t* packet, subscription* data);
 bool mqttIsConnack(uint8_t* packet);
 bool mqttIsPublishPacket(uint8_t* packet);
 bool mqttIsPuback(uint8_t* packet, uint16_t packetIdentifier);
 uint8_t getSubackPayload(uint8_t* packet);
-bool mqttIsSuback(uint8_t* packet, uint16_t packetIdentifier, uint8_t numberOfTopics);
+bool mqttIsAck(uint8_t* packet, packetType type, uint16_t packetIdentifier, uint8_t numberOfTopics);
 bool mqttIsPingResponse(uint8_t* packet);
 
 #endif /* MQTT_H_ */

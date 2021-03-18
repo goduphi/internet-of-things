@@ -93,6 +93,8 @@ typedef enum _state
     PUBLISH_QOS1_MQTT,
     SUBSCRIBE_MQTT,
     SUBACK_MQTT,
+    UNSUBSCRIBE_MQTT,
+    UNSUBACK_MQTT,
     PINGREQ_MQTT,
     PINGRESP_MQTT,
     DISCONNECT_MQTT
@@ -264,6 +266,9 @@ int main(void)
                 if(isCommand(&userData, "subscribe", 1))
                     currentState = SUBSCRIBE_MQTT;
 
+                if(isCommand(&userData, "unsubscribe", 1))
+                    currentState = UNSUBSCRIBE_MQTT;
+
                 if(isCommand(&userData, "ping", 0))
                     currentState = PINGREQ_MQTT;
 
@@ -326,6 +331,11 @@ int main(void)
             assembleMqttSubscribePacket(receivedTcpHeader->data, packetIdentifier, getFieldString(&userData, 1), QOS0, &size);
             sendTcp(etherData, &source, &dest, 0x5000 | PSH | ACK, seqNum, ackNum, 0, 0, size);
             currentState = SUBACK_MQTT;
+            break;
+        case UNSUBSCRIBE_MQTT:
+            assembleMqttUnsubscribePacket(receivedTcpHeader->data, packetIdentifier, getFieldString(&userData, 1), &size);
+            sendTcp(etherData, &source, &dest, 0x5000 | PSH | ACK, seqNum, ackNum, 0, 0, size);
+            currentState = UNSUBACK_MQTT;
             break;
         case CLOSED:
             // Reset all the variables here
@@ -473,7 +483,7 @@ int main(void)
                 currentState = IDLE;
                 break;
             case SUBACK_MQTT:
-                if(!mqttIsSuback(receivedTcpHeader->data, packetIdentifier, 1))
+                if(!mqttIsAck(receivedTcpHeader->data, SUBACK, packetIdentifier, 1))
                 {
                     putsUart0("State: SUBACK_MQTT error\n");
                     currentState = SUBACK_MQTT;
@@ -489,8 +499,22 @@ int main(void)
                     putcUart0('\n');
                 }
                 seqNum += size;
-                // Here, 4 is the size of the puback packet
+                // Here, 5 is the size of the puback packet
                 ackNum = ntohl(receivedTcpHeader->sequenceNumber) + 5;
+                sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
+                currentState = IDLE;
+                break;
+            case UNSUBACK_MQTT:
+                // The number of topics should be zero as only a packet identifier is sent
+                if(!mqttIsAck(receivedTcpHeader->data, UNSUBACK, packetIdentifier, 0))
+                {
+                    putsUart0("State: UNSUBACK_MQTT error\n");
+                    currentState = UNSUBACK_MQTT;
+                    continue;
+                }
+                seqNum += size;
+                // Here, 4 is the size of the suback packet
+                ackNum = ntohl(receivedTcpHeader->sequenceNumber) + 4;
                 sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
                 currentState = IDLE;
                 break;

@@ -155,6 +155,30 @@ void assembleMqttSubscribePacket(uint8_t* packet, uint16_t packetIdentifier, cha
     *tmp = qos;
 }
 
+void assembleMqttUnsubscribePacket(uint8_t* packet, uint16_t packetIdentifier, char* topic, uint16_t* packetLength)
+{
+    fixedHeader* mqttFixedHeader = (fixedHeader*)packet;
+    mqttFixedHeader->controlHeader = (uint8_t)UNSUBSCRIBE;
+
+    uint8_t offset = 0;
+    // The size of the variable header is 2 bytes plus the size of the topic
+    uint32_t remainingLength = sizeof(packetIdentifier) + (sizeof(uint16_t) + strLen(topic));
+    *packetLength = 2 + remainingLength;
+    remainingLength = encodeMqttRemainingLength(remainingLength, &offset);
+
+    uint8_t i = 0;
+    for(i = 0; i < offset; i++)
+        mqttFixedHeader->remainingLength[i] = (remainingLength >> (i << 3)) & 0xFF;
+
+    // Variable header only has the packet identifier
+    uint8_t* tmp = mqttFixedHeader->remainingLength + offset;
+    encodeUtf8(tmp, packetIdentifier, 0);
+    tmp += sizeof(uint16_t);
+
+    // Add the payload
+    encodeUtf8(tmp, strLen(topic), topic);
+}
+
 void getTopicData(uint8_t* packet, subscription* data)
 {
     fixedHeader* mqttFixedHeader = (fixedHeader*)packet;
@@ -212,11 +236,11 @@ uint8_t getSubackPayload(uint8_t* packet)
     return (((*payload) >> 2) & 31);
 }
 
-bool mqttIsSuback(uint8_t* packet, uint16_t packetIdentifier, uint8_t numberOfTopics)
+bool mqttIsAck(uint8_t* packet, packetType type, uint16_t packetIdentifier, uint8_t numberOfTopics)
 {
     fixedHeader* mqttFixedHeader = (fixedHeader*)packet;
     // Remaining length = variable header length (2 bytes) + payload length (numberOfTopics)
-    if(mqttFixedHeader->controlHeader != (uint8_t)SUBACK || mqttFixedHeader->remainingLength[0] != 2 + numberOfTopics)
+    if(mqttFixedHeader->controlHeader != (uint8_t)type || mqttFixedHeader->remainingLength[0] != 2 + numberOfTopics)
         return false;
     uint16_t receivedPacketIdentifier = *(mqttFixedHeader->remainingLength + 1) | *(mqttFixedHeader->remainingLength + 2);
     if(packetIdentifier != receivedPacketIdentifier)
