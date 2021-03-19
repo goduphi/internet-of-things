@@ -34,6 +34,7 @@ typedef enum _sendTcpArgs
     ZERO_LENGTH = 0,
 } sendTcpArgs;
 
+uint16_t getPayloadSize(etherHeader* ether);
 void sendTcp(etherHeader* ether, socket* s, socket* d, uint16_t flags, uint32_t sequenceNumber, uint32_t acknowledgementNumber,
              uint8_t options[], uint8_t optionLength, uint16_t dataLength);
 bool etherIsTcp(etherHeader* ether);

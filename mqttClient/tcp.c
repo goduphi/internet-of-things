@@ -13,6 +13,14 @@
 #include "utils.h"
 #include "mqtt.h"
 
+uint16_t getPayloadSize(etherHeader* ether)
+{
+    ipHeader* ip = (ipHeader*)ether->data;
+    tcpHeader* tcp = (tcpHeader*)ip->data;
+    uint16_t size = (htons(ip->length) - ((ip->revSize & 0xF) << 2)) - ((htons(tcp->offsetFields) >> 12) << 2);
+    return size;
+}
+
 // Checks to see if the ip payload is TCP
 bool etherIsTcp(etherHeader* ether)
 {

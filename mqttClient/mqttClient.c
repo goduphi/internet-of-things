@@ -1,4 +1,4 @@
-// Jason Losh
+// Sarker Nadir Afridi Azmi
 
 //-----------------------------------------------------------------------------
 // Hardware Target
@@ -17,17 +17,6 @@
 //   WOL on PB3
 //   INT on PC6
 
-// Pinning for IoT projects with wireless modules:
-// N24L01+ RF transceiver
-//   MOSI (SSI0Tx) on PA5
-//   MISO (SSI0Rx) on PA4
-//   SCLK (SSI0Clk) on PA2
-//   ~CS on PE0
-//   INT on PB2
-// Xbee module
-//   DIN (UART1TX) on PC5
-//   DOUT (UART1RX) on PC4
-
 
 //-----------------------------------------------------------------------------
 // Configuring Wireshark to examine packets
@@ -36,16 +25,6 @@
 // sudo ethtool --offload eno2 tx off rx off
 // in wireshark, preferences->protocol->ipv4->validate the checksum if possible
 // in wireshark, preferences->protocol->udp->validate the checksum if possible
-
-//-----------------------------------------------------------------------------
-// Sending UDP test packets
-//-----------------------------------------------------------------------------
-
-// test this with a udp send utility like sendip
-//   if sender IP (-is) is 192.168.1.1, this will attempt to
-//   send the udp datagram (-d) to 192.168.1.199, port 1024 (-ud)
-// sudo sendip -p ipv4 -is 192.168.1.1 -p udp -ud 1024 -d "on" 192.168.1.199
-// sudo sendip -p ipv4 -is 192.168.1.1 -p udp -ud 1024 -d "off" 192.168.1.199
 
 //-----------------------------------------------------------------------------
 // Device includes, defines, and assembler directives
@@ -102,8 +81,13 @@ typedef enum _state
 
 // Global variables
 extern bool isCarriageReturn;
+
+// Stores information about the connection
 uint32_t seqNum = 200;
 uint32_t ackNum = 0;
+bool connect = false;
+// Stores the size of the data payload sent
+uint16_t size = 0;
 
 uint8_t ipv4Buffer[4];
 uint8_t serverMacLocalCopy[6];
@@ -136,6 +120,7 @@ void showHelp()
     putsUart0("\thelp\t\tshows help menu\n");
     putsUart0("\tstatus\t\tshows the current IP and MAC of the server\n");
     putsUart0("\tconnect\t\tconnects to Mosquitto server\n");
+    putsUart0("\tsubscribe <TOPIC>\t\tsubscribe to a topic\n");
     putcUart0('\n');
 }
 
@@ -147,6 +132,14 @@ void displayInfo()
     putsUart0("MQTT Broker MAC: ");
     printMac(serverMacLocalCopy);
     putcUart0('\n');
+}
+
+void resetConnection()
+{
+    ackNum = 0;
+    seqNum = 200;
+    size = 0;
+    connect = false;
 }
 
 //-----------------------------------------------------------------------------
@@ -219,9 +212,6 @@ int main(void)
     tcpHeader* receivedTcpHeader = (tcpHeader*)recevedIpHeader->data;
 
     state currentState = IDLE;
-    bool connect = false;
-    // Stores the size of the data payload sent
-    uint16_t size = 0;
 
     // Endless loop
     while(true)
@@ -338,12 +328,8 @@ int main(void)
             currentState = UNSUBACK_MQTT;
             break;
         case CLOSED:
-            // Reset all the variables here
             putsUart0("Connection closed!\n");
-            ackNum = 0;
-            seqNum = 200;
-            size = 0;
-            connect = false;
+            resetConnection();
             currentState = IDLE;
             break;
         }
@@ -363,27 +349,7 @@ int main(void)
             if(etherIsArpRequest(etherData))
                 etherSendArpResponse(etherData);
 
-            // Get publish packets
-            if(etherIsIp(etherData) && etherIsTcp(etherData) && mqttIsPublishPacket(receivedTcpHeader->data))
-            {
-                putsUart0("\nReceived new subscription information\n");
-
-                subscription receivedSubscriptionData;
-                getTopicData(receivedTcpHeader->data, &receivedSubscriptionData);
-
-                putsUart0("Topic name: ");
-                putsUart0(receivedSubscriptionData.topicName);
-                putcUart0('\n');
-                putsUart0("Message: ");
-                putsUart0(receivedSubscriptionData.message);
-                putcUart0('\n');
-
-                ackNum = ntohl(receivedTcpHeader->sequenceNumber) + receivedSubscriptionData.remainingLength + 2;
-                sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
-                currentState = IDLE;
-            }
-
-            // This switch controls the receive part of the state machine
+            // This part of the program controls the receive part of the state machine
             switch(currentState)
             {
             case RECV_ARP:
@@ -394,10 +360,34 @@ int main(void)
                     currentState = SEND_SYN;
                 }
                 break;
-            case RECV_SYN_ACK:
-                // Handle IP datagram
-                if(etherIsIp(etherData) && etherIsTcp(etherData))
+            }
+
+            if(etherIsIp(etherData) && etherIsTcp(etherData))
+            {
+
+                // Get publish packets
+                if(mqttIsPublishPacket(receivedTcpHeader->data))
                 {
+                    putsUart0("\nReceived new subscription information\n");
+
+                    subscription receivedSubscriptionData;
+                    getTopicData(receivedTcpHeader->data, &receivedSubscriptionData);
+
+                    putsUart0("Topic name: ");
+                    putsUart0(receivedSubscriptionData.topicName);
+                    putcUart0('\n');
+                    putsUart0("Message: ");
+                    putsUart0(receivedSubscriptionData.message);
+                    putcUart0('\n');
+
+                    ackNum = ntohl(receivedTcpHeader->sequenceNumber) + receivedSubscriptionData.remainingLength + 2;
+                    sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
+                    currentState = IDLE;
+                }
+
+                switch(currentState)
+                {
+                case RECV_SYN_ACK:
                     // Check if SYN, ACK
                     if((ntohs(receivedTcpHeader->offsetFields) & SYN) && (ntohs(receivedTcpHeader->offsetFields) & ACK))
                     {
@@ -409,28 +399,22 @@ int main(void)
                     else
                     {
                         putsUart0("State: RECV_SYN_ACK error\n");
+                        currentState = RECV_SYN_ACK;
                     }
-                }
-                break;
-            case FIN_WAIT_1:
-                // Handle IP datagram
-                if(etherIsIp(etherData) && etherIsTcp(etherData))
-                {
+                    break;
+                case FIN_WAIT_1:
                     // Check if this is the ACK of FIN
-                    if(ntohs(receivedTcpHeader->offsetFields) & ACK)
+                    if((ntohs(receivedTcpHeader->offsetFields) & ACK) || (htonl(receivedTcpHeader->sequenceNumber) == ackNum))
                     {
                         currentState = FIN_WAIT_2;
                     }
                     else
                     {
                         putsUart0("State: FIN_WAIT_1 error\n");
+                        currentState = FIN_WAIT_1;
                     }
-                }
-                break;
-            case FIN_WAIT_2:
-                // Handle IP datagram
-                if(etherIsIp(etherData) && etherIsTcp(etherData))
-                {
+                    break;
+                case FIN_WAIT_2:
                     // Check if FIN, ACK
                     if((ntohs(receivedTcpHeader->offsetFields) & FIN) && (ntohs(receivedTcpHeader->offsetFields) & ACK))
                     {
@@ -447,91 +431,89 @@ int main(void)
                     {
                         putsUart0("State: FIN_WAIT_2 error\n");
                     }
+                    break;
+                case CONNACK_MQTT:
+                    if(!mqttIsConnack(receivedTcpHeader->data) || (htonl(receivedTcpHeader->sequenceNumber) != ackNum))
+                    {
+                        putsUart0("State: MQTT_CONNACK error\n");
+                        currentState = CONNACK_MQTT;
+                        continue;
+                    }
+                    // Take the size of the previous data sent in bytes and add it to the sequence number
+                    seqNum += size;
+                    // Here, 4 is the size of the connack packet
+                    ackNum = ntohl(receivedTcpHeader->sequenceNumber) + getPayloadSize(etherData);
+                    sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
+                    currentState = IDLE;
+                    break;
+                case PUBLISH_QOS0_MQTT:
+                    // Take the size of the previous data sent in bytes and add it to the sequence number
+                    seqNum += size;
+                    break;
+                case PUBLISH_QOS1_MQTT:
+                    if(!mqttIsPuback(receivedTcpHeader->data, packetIdentifier) || (htonl(receivedTcpHeader->sequenceNumber) != ackNum))
+                    {
+                        putsUart0("State: PUBLISH_QOS1_MQTT error\n");
+                        currentState = PUBLISH_QOS1_MQTT;
+                        continue;
+                    }
+                    seqNum += size;
+                    // Here, 4 is the size of the puback packet
+                    ackNum = ntohl(receivedTcpHeader->sequenceNumber) + getPayloadSize(etherData);
+                    sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
+                    currentState = IDLE;
+                    break;
+                case SUBACK_MQTT:
+                    if(!mqttIsAck(receivedTcpHeader->data, SUBACK, packetIdentifier, 1)  || (htonl(receivedTcpHeader->sequenceNumber) != ackNum))
+                    {
+                        putsUart0("State: SUBACK_MQTT error\n");
+                        currentState = SUBACK_MQTT;
+                        continue;
+                    }
+                    uint8_t returnCode = getSubackPayload(receivedTcpHeader->data);
+                    if(returnCode == SUBACK_FAILURE)
+                        putsUart0("Error: SUBACK_FAILURE");
+                    else
+                    {
+                        putsUart0("Maximum QoS granted: ");
+                        printUint8InDecimal(returnCode);
+                        putcUart0('\n');
+                    }
+                    seqNum += size;
+                    // Here, 5 is the size of the puback packet
+                    ackNum = ntohl(receivedTcpHeader->sequenceNumber) + getPayloadSize(etherData);
+                    sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
+                    currentState = IDLE;
+                    break;
+                case UNSUBACK_MQTT:
+                    // The number of topics should be zero as only a packet identifier is sent
+                    if(!mqttIsAck(receivedTcpHeader->data, UNSUBACK, packetIdentifier, 0) || (htonl(receivedTcpHeader->sequenceNumber) != ackNum))
+                    {
+                        putsUart0("State: UNSUBACK_MQTT error\n");
+                        currentState = UNSUBACK_MQTT;
+                        continue;
+                    }
+                    seqNum += size;
+                    // Here, 4 is the size of the suback packet
+                    ackNum = ntohl(receivedTcpHeader->sequenceNumber) + getPayloadSize(etherData);
+                    sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
+                    currentState = IDLE;
+                    break;
+                case PINGRESP_MQTT:
+                    if(!mqttIsPingResponse(receivedTcpHeader->data) || (htonl(receivedTcpHeader->sequenceNumber) != ackNum))
+                    {
+                        putsUart0("State: PINGRESP_MQTT -> No ping response\n");
+                        currentState = PINGRESP_MQTT;
+                        continue;
+                    }
+                    // Take the size of the previous data sent in bytes and add it to the sequence number
+                    seqNum += size;
+                    // Here, 4 is the size of the connack packet
+                    ackNum = ntohl(receivedTcpHeader->sequenceNumber) + getPayloadSize(etherData);
+                    sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
+                    currentState = IDLE;
+                    break;
                 }
-                break;
-            case CONNACK_MQTT:
-                if(!mqttIsConnack(receivedTcpHeader->data))
-                {
-                    putsUart0("State: MQTT_CONNACK error\n");
-                    currentState = CONNACK_MQTT;
-                    continue;
-                }
-                // IMPORTANT: Add check to make sure sequence number is equal to previous acknowledgement number
-                // Take the size of the previous data sent in bytes and add it to the sequence number
-                seqNum += size;
-                // Here, 4 is the size of the connack packet
-                ackNum = ntohl(receivedTcpHeader->sequenceNumber) + 4;
-                sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
-                currentState = IDLE;
-                break;
-            case PUBLISH_QOS0_MQTT:
-                // IMPORTANT: Add check to make sure sequence number is equal to previous acknowledgement number
-                // Take the size of the previous data sent in bytes and add it to the sequence number
-                seqNum += size;
-                break;
-            case PUBLISH_QOS1_MQTT:
-                if(!mqttIsPuback(receivedTcpHeader->data, packetIdentifier))
-                {
-                    putsUart0("State: PUBLISH_QOS1_MQTT error\n");
-                    currentState = PUBLISH_QOS1_MQTT;
-                    continue;
-                }
-                seqNum += size;
-                // Here, 4 is the size of the puback packet
-                ackNum = ntohl(receivedTcpHeader->sequenceNumber) + 4;
-                sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
-                currentState = IDLE;
-                break;
-            case SUBACK_MQTT:
-                if(!mqttIsAck(receivedTcpHeader->data, SUBACK, packetIdentifier, 1))
-                {
-                    putsUart0("State: SUBACK_MQTT error\n");
-                    currentState = SUBACK_MQTT;
-                    continue;
-                }
-                uint8_t returnCode = getSubackPayload(receivedTcpHeader->data);
-                if(returnCode == SUBACK_FAILURE)
-                    putsUart0("Error: SUBACK_FAILURE");
-                else
-                {
-                    putsUart0("Maximum QoS granted: ");
-                    printUint8InDecimal(returnCode);
-                    putcUart0('\n');
-                }
-                seqNum += size;
-                // Here, 5 is the size of the puback packet
-                ackNum = ntohl(receivedTcpHeader->sequenceNumber) + 5;
-                sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
-                currentState = IDLE;
-                break;
-            case UNSUBACK_MQTT:
-                // The number of topics should be zero as only a packet identifier is sent
-                if(!mqttIsAck(receivedTcpHeader->data, UNSUBACK, packetIdentifier, 0))
-                {
-                    putsUart0("State: UNSUBACK_MQTT error\n");
-                    currentState = UNSUBACK_MQTT;
-                    continue;
-                }
-                seqNum += size;
-                // Here, 4 is the size of the suback packet
-                ackNum = ntohl(receivedTcpHeader->sequenceNumber) + 4;
-                sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
-                currentState = IDLE;
-                break;
-            case PINGRESP_MQTT:
-                if(!mqttIsPingResponse(receivedTcpHeader->data))
-                {
-                    putsUart0("State: PINGRESP_MQTT -> No ping response\n");
-                    currentState = PINGRESP_MQTT;
-                    continue;
-                }
-                // Take the size of the previous data sent in bytes and add it to the sequence number
-                seqNum += size;
-                // Here, 4 is the size of the connack packet
-                ackNum = ntohl(receivedTcpHeader->sequenceNumber) + 2;
-                sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
-                currentState = IDLE;
-                break;
             }
         }
     }
