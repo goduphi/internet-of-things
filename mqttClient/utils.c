@@ -95,3 +95,35 @@ uint16_t strLen(const char* str)
         i++;
     return i;
 }
+
+uint16_t middleSquareMethodRand(uint8_t digits, uint16_t seed)
+{
+    uint16_t n = seed * seed;
+    uint8_t tmp[digits << 1];
+    int8_t i = 0, start = 0, end = (digits << 1) - 1;
+    for(i = end; i >= 0; i--)
+    {
+        tmp[i] = (n % 10);
+        n /= 10;
+    }
+    start = digits >> 1;
+    end = start + digits;
+    n = 0;
+    for(i = start; i < end; i++)
+    {
+        n = (n * 10) + tmp[i];
+    }
+    return n;
+}
+
+void copySubscribeArguments(USER_DATA* data, char* buffer, uint32_t* totalLength)
+{
+    uint8_t i = 0;
+    for(i = 1; i < data->fieldCount; i++)
+    {
+        copyUint8Array(getFieldString(data, i), buffer, strLen(getFieldString(data, i)));
+        buffer[strLen(getFieldString(data, i))] = '\0';
+        buffer += strLen(getFieldString(data, i)) + 1;
+        *totalLength += strLen(getFieldString(data, i));
+    }
+}

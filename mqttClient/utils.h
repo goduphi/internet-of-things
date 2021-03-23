@@ -20,5 +20,7 @@ void printMac(uint8_t mac[]);
 void copyUint8Array(uint8_t src[], uint8_t dest[], uint8_t size);
 void encodeUtf8(void* packet, uint16_t length, char* string);
 uint16_t strLen(const char* str);
+uint16_t middleSquareMethodRand(uint8_t digits, uint16_t seed);
+void copySubscribeArguments(USER_DATA* data, char* buffer, uint32_t* totalLength);
 
 #endif /* UTILS_H_ */

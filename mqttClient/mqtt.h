@@ -16,6 +16,8 @@
 #define MAX_TOPIC_NAME_SIZE     10
 #define MAX_MESSAGE_SIZE        60
 
+#define DEFAULT_KEEP_ALIVE      100
+
 // 3.1.2.3 Connect flags
 #define CLEAN_SESSION           2
 #define WILL_FLAGS              4
@@ -75,11 +77,10 @@ typedef struct _subscription
     uint32_t remainingLength;
 } subscription;
 
-void assembleMqttConnectPacket(uint8_t* packet, uint8_t flags, char* clientId, uint16_t cliendIdLength, uint16_t* packetLength);
+void assembleMqttConnectPacket(uint8_t* packet, uint8_t flags, uint16_t keepAlive, char* clientId, uint16_t cliendIdLength, uint16_t* packetLength);
 void assembleMqttPacket(uint8_t* packet, packetType type, uint16_t* packetLength);
 void assembleMqttPublishPacket(uint8_t* packet, char* topicName, uint16_t packetIdentifier, uint8_t qos, char* payload, uint16_t* packetLength);
-void assembleMqttSubscribePacket(uint8_t* packet, uint16_t packetIdentifier, char* topic, uint8_t qos, uint16_t* packetLength);
-void assembleMqttUnsubscribePacket(uint8_t* packet, uint16_t packetIdentifier, char* topic, uint16_t* packetLength);
+void assembleMqttSubscribeUnsubscribePacket(uint8_t* packet, packetType type, uint16_t packetIdentifier, char* topic, uint32_t totalLength, uint8_t numberOfTopics, uint8_t qos, uint16_t* packetLength);
 void getTopicData(uint8_t* packet, subscription* data);
 bool mqttIsConnack(uint8_t* packet);
 bool mqttIsPublishPacket(uint8_t* packet);

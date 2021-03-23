@@ -51,7 +51,7 @@ uint32_t decodeMqttRemainingLength(uint32_t X)
     return size;
 }
 
-void assembleMqttConnectPacket(uint8_t* packet, uint8_t flags, char* clientId, uint16_t cliendIdLength, uint16_t* packetLength)
+void assembleMqttConnectPacket(uint8_t* packet, uint8_t flags, uint16_t keepAlive, char* clientId, uint16_t cliendIdLength, uint16_t* packetLength)
 {
     fixedHeader* mqttFixedHeader = (fixedHeader*)packet;
 
@@ -76,8 +76,7 @@ void assembleMqttConnectPacket(uint8_t* packet, uint8_t flags, char* clientId, u
     // v3.1.1
     variableHeader->protocolLevel = PROTOCOL_LEVEL_V311;
     variableHeader->connectFlags = flags;
-    // For now, a default value of 100s is enough
-    variableHeader->keepAlive = htons(100);
+    variableHeader->keepAlive = htons(keepAlive);
 
     encodeUtf8(payload, cliendIdLength, clientId);
 }
@@ -129,14 +128,14 @@ void assembleMqttPublishPacket(uint8_t* packet, char* topicName, uint16_t packet
     encodeUtf8(tmp, strLen(payload), payload);
 }
 
-void assembleMqttSubscribePacket(uint8_t* packet, uint16_t packetIdentifier, char* topic, uint8_t qos, uint16_t* packetLength)
+void assembleMqttSubscribeUnsubscribePacket(uint8_t* packet, packetType type, uint16_t packetIdentifier, char* topic, uint32_t totalLength, uint8_t numberOfTopics, uint8_t qos, uint16_t* packetLength)
 {
     fixedHeader* mqttFixedHeader = (fixedHeader*)packet;
-    mqttFixedHeader->controlHeader = (uint8_t)SUBSCRIBE;
+    mqttFixedHeader->controlHeader = (uint8_t)type;
 
     uint8_t offset = 0;
     // Since we are using utf-8 encoding for the payload, we need to add the size of the uint16_t for the length
-    uint32_t remainingLength = sizeof(packetIdentifier) + (sizeof(uint16_t) + strLen(topic)) + sizeof(qos);
+    uint32_t remainingLength = sizeof(packetIdentifier) + (sizeof(uint16_t) * numberOfTopics + totalLength) + ((type == SUBSCRIBE) ? sizeof(qos) * numberOfTopics : 0);
     *packetLength = 2 + remainingLength;
     remainingLength = encodeMqttRemainingLength(remainingLength, &offset);
 
@@ -150,33 +149,16 @@ void assembleMqttSubscribePacket(uint8_t* packet, uint16_t packetIdentifier, cha
     tmp += sizeof(uint16_t);
 
     // Add the payload
-    encodeUtf8(tmp, strLen(topic), topic);
-    tmp += sizeof(uint16_t) + strLen(topic);
-    *tmp = qos;
-}
-
-void assembleMqttUnsubscribePacket(uint8_t* packet, uint16_t packetIdentifier, char* topic, uint16_t* packetLength)
-{
-    fixedHeader* mqttFixedHeader = (fixedHeader*)packet;
-    mqttFixedHeader->controlHeader = (uint8_t)UNSUBSCRIBE;
-
-    uint8_t offset = 0;
-    // The size of the variable header is 2 bytes plus the size of the topic
-    uint32_t remainingLength = sizeof(packetIdentifier) + (sizeof(uint16_t) + strLen(topic));
-    *packetLength = 2 + remainingLength;
-    remainingLength = encodeMqttRemainingLength(remainingLength, &offset);
-
-    uint8_t i = 0;
-    for(i = 0; i < offset; i++)
-        mqttFixedHeader->remainingLength[i] = (remainingLength >> (i << 3)) & 0xFF;
-
-    // Variable header only has the packet identifier
-    uint8_t* tmp = mqttFixedHeader->remainingLength + offset;
-    encodeUtf8(tmp, packetIdentifier, 0);
-    tmp += sizeof(uint16_t);
-
-    // Add the payload
-    encodeUtf8(tmp, strLen(topic), topic);
+    for(i = 0; i < numberOfTopics; i++)
+    {
+        encodeUtf8(tmp, strLen(topic), topic);
+        tmp += sizeof(uint16_t) + strLen(topic);
+        // Skip to the next topic stored in the buffer
+        // An offset of 1 represents the null terminator
+        topic += strLen(topic) + 1;
+        if(type == SUBSCRIBE)
+            *(tmp++) = qos;
+    }
 }
 
 void getTopicData(uint8_t* packet, subscription* data)

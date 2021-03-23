@@ -185,10 +185,10 @@ bool isCommand(USER_DATA* data, const char strCommand[], uint8_t minArguments)
     return false;
 }
 
-// Gets a pointer the requested integer field from the input
-int32_t getFieldInteger(USER_DATA* data, uint8_t fieldNumber)
+// Gets the requested integer field from the input
+uint32_t getFieldInteger(USER_DATA* data, uint8_t fieldNumber)
 {
-    int32_t sum = 0;
+    uint32_t sum = 0;
     if((fieldNumber < MAX_FIELDS) &&
        (fieldNumber < data->fieldCount) &&
        (data->fieldType[fieldNumber] == 'n'))

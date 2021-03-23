@@ -54,6 +54,11 @@
 // Ether frame header (18) + Max MTU (1500) + CRC (4)
 #define MAX_PACKET_SIZE         1522
 
+#define SERVER_IP               1
+#define CLIENT_IP               2
+
+#define MQTT_PORT               1883
+
 typedef enum _state
 {
     IDLE,
@@ -63,6 +68,8 @@ typedef enum _state
     RECV_SYN_ACK,
     FIN_WAIT_1,
     FIN_WAIT_2,
+    CLOSE_WAIT,
+    LAST_ACK,
     CLOSED,
     // MQTT states
     CONNECT_MQTT,
@@ -86,17 +93,54 @@ extern bool isCarriageReturn;
 uint32_t seqNum = 200;
 uint32_t ackNum = 0;
 bool connect = false;
+bool established = false;
 // Stores the size of the data payload sent
 uint16_t size = 0;
 
-uint8_t ipv4Buffer[4];
-uint8_t serverMacLocalCopy[6];
+// Buffers used by the client to store information
+uint8_t clientIp[] = {0,0,0,0};
+uint8_t serverIp[] = {0,0,0,0};
+uint8_t serverMacLocalCopy[] = {0,0,0,0,0,0};
+
+// Variables used specifically for MQTT
 uint8_t qos = QOS1;
-uint16_t packetIdentifier = 69;
+uint16_t packetIdentifier = 18;
+uint16_t keepAliveTime = DEFAULT_KEEP_ALIVE;
+
+// Used by the custom rand function
+uint8_t seed = 153;
 
 //-----------------------------------------------------------------------------
 // Subroutines                
 //-----------------------------------------------------------------------------
+
+void rebootSystem()
+{
+    NVIC_APINT_R = (0x05FA0000 | NVIC_APINT_SYSRESETREQ);
+}
+
+// This function should not be used on release software
+// Uses the middle square method
+uint16_t generateRandomNumber()
+{
+    uint16_t n = seed * seed;
+    uint8_t i = 0, start = 0, end = 0;
+    uint8_t tmp[8];
+    for(i = 0; i < 8; i++)
+    {
+        tmp[(8 - 1) - i] = n % 10;
+        n /= 10;
+    }
+    start = 2;
+    end = start + 4;
+    for(; start <= end; start++)
+    {
+        n = n * 10 + tmp[start];
+    }
+    // Set the seed value here
+    seed = n;
+    return n;
+}
 
 // Initialize Hardware
 void initHw()
@@ -116,18 +160,23 @@ void initHw()
 
 void showHelp()
 {
-    putsUart0("\nMQTT Client Help Desk!\n");
-    putsUart0("\thelp\t\tshows help menu\n");
-    putsUart0("\tstatus\t\tshows the current IP and MAC of the server\n");
-    putsUart0("\tconnect\t\tconnects to Mosquitto server\n");
-    putsUart0("\tsubscribe <TOPIC>\t\tsubscribe to a topic\n");
-    putcUart0('\n');
+    putsUart0("\nMQTT Client Help Desk!\n\n");
+    putsUart0("\thelp\t\t\t\t\tShows help menu\n\n");
+    putsUart0("\treboot\t\t\t\t\tRestarts the system\n\n");
+    putsUart0("\tstatus\t\t\t\t\tShows the Client IP, Server IP and MAC\n\n");
+    putsUart0("\tconnect <Keep Alive Time>\t\tConnects to Mosquitto server\n\n");
+    putsUart0("\tpublish <TOPIC NAME> <MESSAGE>\t\tPublishes a topic\n\n");
+    putsUart0("\tsubscribe <TOPIC1> <TOPIC2> ...\t\tSubscribe to topic(s)\n\n");
+    putsUart0("\tunsubscribe <TOPIC1> <TOPIC2> ...\tUnsubscribes from topic(s)\n\n");
 }
 
 void displayInfo()
 {
+    putsUart0("Client IP: ");
+    printIpv4(clientIp);
+    putcUart0('\n');
     putsUart0("MQTT Server IP: ");
-    printIpv4(ipv4Buffer);
+    printIpv4(serverIp);
     putcUart0('\n');
     putsUart0("MQTT Broker MAC: ");
     printMac(serverMacLocalCopy);
@@ -137,9 +186,25 @@ void displayInfo()
 void resetConnection()
 {
     ackNum = 0;
-    seqNum = 200;
+    seqNum = generateRandomNumber();
     size = 0;
     connect = false;
+    established = false;
+}
+
+// Gets the IP address from the EEPROM
+bool getIps(uint8_t ipBuffer[], char* message, uint8_t whichIp)
+{
+    // The default EEPROM value is 0xFFFFFFFF
+    uint32_t mqttIpv4Address = readEeprom(PROJECT_META_DATA + ((whichIp == SERVER_IP) ? 1 : 2));
+    if(mqttIpv4Address != 0xFFFFFFFF)
+    {
+        convertEncodedIpv4ToArray(ipBuffer, mqttIpv4Address);
+        return true;
+    }
+    else
+        putsUart0(message);
+    return false;
 }
 
 //-----------------------------------------------------------------------------
@@ -175,15 +240,10 @@ int main(void)
     uint8_t buffer[MAX_PACKET_SIZE];
     etherHeader* etherData = (etherHeader*)buffer;
 
-    USER_DATA userData;
-
     // Get the IP address from the EEPROM
-    // The default EEPROM value is 0xFFFFFFFF
-    uint32_t mqttIpv4Address = readEeprom(PROJECT_META_DATA + 1);
-    if(mqttIpv4Address != 0xFFFFFFFF)
-        convertEncodedIpv4ToArray(ipv4Buffer, mqttIpv4Address);
-    else
-        putsUart0("The IP needs to be set before connecting!\n");
+    if(getIps(serverIp, "The Server IP needs to be set before connecting!\n", SERVER_IP) &&
+       getIps(clientIp, "The Client IP needs to be set before connecting!\n", CLIENT_IP))
+        connect = true;
 
     // These are here for testing purposes
     socket source;
@@ -191,10 +251,10 @@ int main(void)
 
     // Fill up the socket information
     etherGetIpAddress(source.ip);
-    source.port = 0;
+    source.port = generateRandomNumber();
     etherGetMacAddress(source.mac);
-    copyUint8Array(ipv4Buffer, dest.ip, 4);
-    dest.port = 1883;
+    copyUint8Array(serverIp, dest.ip, 4);
+    dest.port = MQTT_PORT;
 
     /*
      * Followed RFC793
@@ -207,10 +267,12 @@ int main(void)
     uint8_t optionsLength = 4;
     uint8_t options[] = {0x02, 0x04, 0x05, 0xB4, 0x00};
 
+    USER_DATA userData;
+    uint32_t mqttIpv4Address = 0;
+
     // Variables for the state machine
     ipHeader* recevedIpHeader = (ipHeader*)etherData->data;
     tcpHeader* receivedTcpHeader = (tcpHeader*)recevedIpHeader->data;
-
     state currentState = IDLE;
 
     // Endless loop
@@ -226,6 +288,9 @@ int main(void)
 
                 parseField(&userData);
 
+                if(isCommand(&userData, "reboot", 0))
+                    rebootSystem();
+
                 if(isCommand(&userData, "set", 2))
                 {
                     if(stringCompare("MQTT", getFieldString(&userData, 1)))
@@ -234,10 +299,20 @@ int main(void)
                         {
                             // Save the MQTT IPv4 address
                             mqttIpv4Address = getIpv4Address(&userData, 1);
+                            convertEncodedIpv4ToArray(serverIp, mqttIpv4Address);
                             writeEeprom(PROJECT_META_DATA + 1, mqttIpv4Address);
                         }
                         else
                             putsUart0("Format: 255.255.255.255\n");
+                    }
+
+                    if(stringCompare("IP", getFieldString(&userData, 1)))
+                    {
+                        mqttIpv4Address = getIpv4Address(&userData, 1);
+                        convertEncodedIpv4ToArray(clientIp, mqttIpv4Address);
+                        writeEeprom(PROJECT_META_DATA + 2, mqttIpv4Address);
+                        etherSetIpAddress(clientIp[0], clientIp[1], clientIp[2], clientIp[3]);
+                        etherGetIpAddress(source.ip);
                     }
                 }
 
@@ -248,22 +323,33 @@ int main(void)
                     showHelp();
 
                 if(isCommand(&userData, "connect", 0))
+                {
+                    if(userData.fieldCount > 1)
+                    {
+                        keepAliveTime = getFieldInteger(&userData, 1) & 0xFFFF;
+                        if(keepAliveTime == 0)
+                            keepAliveTime = DEFAULT_KEEP_ALIVE;
+                    }
                     connect = true;
+                }
 
-                if(isCommand(&userData, "publish", 2))
-                    currentState = PUBLISH_MQTT;
+                if(established)
+                {
+                    if(isCommand(&userData, "publish", 2))
+                        currentState = PUBLISH_MQTT;
 
-                if(isCommand(&userData, "subscribe", 1))
-                    currentState = SUBSCRIBE_MQTT;
+                    if(isCommand(&userData, "subscribe", 1))
+                        currentState = SUBSCRIBE_MQTT;
 
-                if(isCommand(&userData, "unsubscribe", 1))
-                    currentState = UNSUBSCRIBE_MQTT;
+                    if(isCommand(&userData, "unsubscribe", 1))
+                        currentState = UNSUBSCRIBE_MQTT;
 
-                if(isCommand(&userData, "ping", 0))
-                    currentState = PINGREQ_MQTT;
+                    if(isCommand(&userData, "ping", 0))
+                        currentState = PINGREQ_MQTT;
 
-                if(isCommand(&userData, "disconnect", 0))
-                    currentState = DISCONNECT_MQTT;
+                    if(isCommand(&userData, "disconnect", 0))
+                        currentState = DISCONNECT_MQTT;
+                }
             }
         }
 
@@ -280,7 +366,7 @@ int main(void)
         {
         case SEND_ARP:
             // Send an ARP request to find out what the MAC address of the server is
-            etherSendArpRequest(etherData, ipv4Buffer);
+            etherSendArpRequest(etherData, serverIp);
             currentState = RECV_ARP;
             break;
         case SEND_SYN:
@@ -288,7 +374,7 @@ int main(void)
             currentState = RECV_SYN_ACK;
             break;
         case CONNECT_MQTT:
-            assembleMqttConnectPacket(receivedTcpHeader->data, CLEAN_SESSION, "test", 4, &size);
+            assembleMqttConnectPacket(receivedTcpHeader->data, CLEAN_SESSION, keepAliveTime, "test", 4, &size);
             sendTcp(etherData, &source, &dest, 0x5000 | PSH | ACK, seqNum, ackNum, 0, 0, size);
             currentState = CONNACK_MQTT;
             break;
@@ -318,18 +404,32 @@ int main(void)
             }
             break;
         case SUBSCRIBE_MQTT:
-            assembleMqttSubscribePacket(receivedTcpHeader->data, packetIdentifier, getFieldString(&userData, 1), QOS0, &size);
+            {
+            uint32_t totalMessageLength = 0;
+            copySubscribeArguments(&userData, etherData, &totalMessageLength);
+            assembleMqttSubscribeUnsubscribePacket((uint8_t*)receivedTcpHeader->data, SUBSCRIBE, packetIdentifier, etherData, totalMessageLength, userData.fieldCount - 1, QOS0, &size);
             sendTcp(etherData, &source, &dest, 0x5000 | PSH | ACK, seqNum, ackNum, 0, 0, size);
+            }
             currentState = SUBACK_MQTT;
             break;
         case UNSUBSCRIBE_MQTT:
-            assembleMqttUnsubscribePacket(receivedTcpHeader->data, packetIdentifier, getFieldString(&userData, 1), &size);
+            {
+            uint32_t totalMessageLength = 0;
+            copySubscribeArguments(&userData, etherData, &totalMessageLength);
+            assembleMqttSubscribeUnsubscribePacket((uint8_t*)receivedTcpHeader->data, UNSUBSCRIBE, packetIdentifier, etherData, totalMessageLength, userData.fieldCount - 1, 0, &size);
             sendTcp(etherData, &source, &dest, 0x5000 | PSH | ACK, seqNum, ackNum, 0, 0, size);
+            }
             currentState = UNSUBACK_MQTT;
+            break;
+        case CLOSE_WAIT:
+            sendTcp(etherData, &source, &dest, 0x5000 | FIN | ACK, seqNum, ackNum, 0, 0, 0);
+            currentState = LAST_ACK;
             break;
         case CLOSED:
             putsUart0("Connection closed!\n");
+            setPinValue(BLUE_LED, 0);
             resetConnection();
+            source.port = generateRandomNumber();
             currentState = IDLE;
             break;
         }
@@ -402,6 +502,7 @@ int main(void)
                         currentState = RECV_SYN_ACK;
                     }
                     break;
+                // This is for the active close of the socket
                 case FIN_WAIT_1:
                     // Check if this is the ACK of FIN
                     if((ntohs(receivedTcpHeader->offsetFields) & ACK) || (htonl(receivedTcpHeader->sequenceNumber) == ackNum))
@@ -432,6 +533,18 @@ int main(void)
                         putsUart0("State: FIN_WAIT_2 error\n");
                     }
                     break;
+                case LAST_ACK:
+                    // Check if this is the last ack of the passive close of the socket
+                    if((ntohs(receivedTcpHeader->offsetFields) & ACK) || (htonl(receivedTcpHeader->sequenceNumber) == ackNum))
+                    {
+                        waitMicrosecond(TIMEOUT_2MS);
+                        currentState = CLOSED;
+                    }
+                    else
+                    {
+                        putsUart0("State: LAST_ACK error\n");
+                    }
+                    break;
                 case CONNACK_MQTT:
                     if(!mqttIsConnack(receivedTcpHeader->data) || (htonl(receivedTcpHeader->sequenceNumber) != ackNum))
                     {
@@ -445,6 +558,9 @@ int main(void)
                     ackNum = ntohl(receivedTcpHeader->sequenceNumber) + getPayloadSize(etherData);
                     sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
                     currentState = IDLE;
+                    // We enter the established state here
+                    established = true;
+                    setPinValue(BLUE_LED, 1);
                     break;
                 case PUBLISH_QOS0_MQTT:
                     // Take the size of the previous data sent in bytes and add it to the sequence number
@@ -464,12 +580,16 @@ int main(void)
                     currentState = IDLE;
                     break;
                 case SUBACK_MQTT:
-                    if(!mqttIsAck(receivedTcpHeader->data, SUBACK, packetIdentifier, 1)  || (htonl(receivedTcpHeader->sequenceNumber) != ackNum))
+                    // This state must only be set if the subscribe command is executed
+                    // The field count - 1 would give the number of topics
+                    if(!mqttIsAck(receivedTcpHeader->data, SUBACK, packetIdentifier, userData.fieldCount - 1)  || (htonl(receivedTcpHeader->sequenceNumber) != ackNum))
                     {
                         putsUart0("State: SUBACK_MQTT error\n");
                         currentState = SUBACK_MQTT;
                         continue;
                     }
+                    // This only checks the first return code
+                    // ADD: Check all the return codes
                     uint8_t returnCode = getSubackPayload(receivedTcpHeader->data);
                     if(returnCode == SUBACK_FAILURE)
                         putsUart0("Error: SUBACK_FAILURE");
@@ -513,6 +633,17 @@ int main(void)
                     sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
                     currentState = IDLE;
                     break;
+                }
+
+                // This is for passive close of the socket
+                if((ntohs(receivedTcpHeader->offsetFields) & FIN) && (ntohs(receivedTcpHeader->offsetFields) & ACK) &&
+                   (htonl(receivedTcpHeader->sequenceNumber) == ackNum))
+                {
+                    // The sequence number should be the one that was part of the last message by the client
+                    ackNum = ntohl(receivedTcpHeader->sequenceNumber) + 1;
+                    sendTcp(etherData, &source, &dest, 0x5000 | ACK, seqNum, ackNum, 0, 0, 0);
+                    putsUart0("The server is closing down the connection.\n");
+                    currentState = CLOSE_WAIT;
                 }
             }
         }
