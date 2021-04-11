@@ -4,7 +4,9 @@
  *  Created on: Mar 25, 2021
  *      Author: Sarker Nadir Afridi Azmi
  *
- * Pinout
+ * Target Board: TM4C123GH6PM @40MHz
+ *
+ * Pinout (SPI1)
  * ------
  * CE       (PD6)
  * CSN      (PD1)
@@ -26,26 +28,33 @@
 #define W_TX_PAYLOAD        0xA0
 #define FLUSH_TX            0xE1
 #define FLUSH_RX            0xE2
+#define ACTIVATE            0x50
 #define W_TX_PAYLOAD_NO_ACK 0xB0
 #define NOP                 0xFF
 
-// Register bit fields
-#define EN_CRC              8
-#define PWR_UP              2
-#define PRIM_RX             1
+// Registers
+#define RX_ADDR_P0          0x0A
+#define RX_ADDR_P1          0x0B
+#define RX_ADDR_P2          0x0C
+#define RX_ADDR_P3          0x0D
+#define RX_ADDR_P4          0x0E
+#define RX_ADDR_P5          0x0F
+#define TX_ADDR             0x10
 
 typedef enum _mode
 {
-    POWER_DOWN, RX, TX
+    RX, TX
 } mode;
 
-void initNrf24l01(uint32_t address);
+void initNrf24l01();
 void rfWriteRegister(uint8_t reg, uint8_t data);
 uint8_t rfReadRegister(uint8_t reg);
 void rfReadIntoBuffer(uint8_t reg, uint8_t buffer[], uint8_t nBytes);
-void rfSendBuffer(uint8_t buffer[], uint8_t nBytes);
+void rfSetAddress(uint8_t pipe, uint32_t address);
 void rfSetMode(mode m, uint8_t frequency);
+
 bool rfIsDataAvailable();
+void rfSendBuffer(uint8_t buffer[], uint8_t nBytes);
 void rfReceiveBuffer(uint8_t buffer[], uint8_t nBytes);
 
 #endif /* NRF24L01_H_ */

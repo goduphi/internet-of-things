@@ -1,7 +1,8 @@
 /**
- * Sarker Nadir Afridi Azmi
+ * Author: Sarker Nadir Afridi Azmi
  *
- * Stack Size: 4096
+ * Description: A simple protocol less application which can
+ * send information wirelessly using the RF24L01 module.
  */
 
 #include <stdint.h>
@@ -14,12 +15,18 @@
 #include "nrf24l01.h"
 #include <stdio.h>
 
-#define REC
+#define ADDRESS0    0xACCE55
+
+//#define REC
 
 int main(void)
 {
     initSystemClockTo40Mhz();
-    initNrf24l01(0xACCE55);
+    initNrf24l01();
+
+    // Only use one data pipe to transmit data
+    rfSetAddress(RX_ADDR_P0, ADDRESS0);
+    rfSetAddress(TX_ADDR, ADDRESS0);
 
 #ifdef REC
     rfSetMode(RX, 20);

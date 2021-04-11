@@ -21,13 +21,16 @@
 #define CSN                 PORTD,1
 #define CHIP_ENABLE         PORTD,6
 
-// Registers
+// Register                 Addr    Bit Fields
 #define CONFIG              0x00
+#define EN_CRC                      0x08    // Enable CRC
+#define PWR_UP                      0x02    // Powers up device
+#define PRIM_RX                     0x01    // Sets the device in Receive mode
 #define EN_AA               0x01
 #define ENAA_P0                     0x01
 #define EN_RXADDR           0x02
 #define ERX_P0                      0x01
-#define SETUP_AW            0x03    // Sets the width of the address
+#define SETUP_AW            0x03            // Sets the width of the address
 #define SETUP_RETR          0x04
 #define RF_CH               0x05
 #define RF_SETUP            0x06
@@ -38,13 +41,6 @@
 #define RX_P_NO                     0x07
 #define OBSERVE_TX          0x08
 #define CD                  0x09
-#define RX_ADDR_P0          0x0A
-#define RX_ADDR_P1          0x0B
-#define RX_ADDR_P2          0x0C
-#define RX_ADDR_P3          0x0D
-#define RX_ADDR_P4          0x0E
-#define RX_ADDR_P5          0x0F
-#define TX_ADDR             0x10
 #define RX_PW_P0            0x11
 #define RX_PW_P1            0x12
 #define RX_PW_P2            0x13
@@ -52,6 +48,10 @@
 #define RX_PW_P4            0x15
 #define RX_PW_P5            0x16
 #define FIFO_STATUS         0x17
+#define TX_FULL                     0x20
+#define TX_EMPTY                    0x10
+#define RX_FULL                     0x02
+#define RX_EMPTY                    0x01
 #define DYNPD               0x1C
 #define DPL_P0                      0x01
 #define FEATURE             0x1D
@@ -138,7 +138,7 @@ void rfReadIntoBuffer(uint8_t reg, uint8_t buffer[], uint8_t nBytes)
  */
 void rfSetAddress(uint8_t pipe, uint32_t address)
 {
-    // The address width is always 4 bytes - 0x10
+    // The address width is always 4 bytes - 0x02
     rfWriteRegister(SETUP_AW, 0x02);
     rfCsOff();
     // Select the address (pipe) register
@@ -158,12 +158,16 @@ void rfSetAddress(uint8_t pipe, uint32_t address)
 
 void rfSetMode(mode m, uint8_t frequency)
 {
-    // This is an error as the frequency cannot be more than 2.52GHz
+    // This is an error as the frequency cannot be more than 2.525GHz
     if(frequency > 125)
         return;
+
     chipDisable();
     // Frequency = 2400 + RF_CH [MHz]
     rfWriteRegister(RF_CH, frequency);
+    // 1. Use dynamic payload length
+    rfWriteRegister(FEATURE, EN_DPL);
+    rfWriteRegister(ACTIVATE, 0x73);
     switch(m)
     {
     case RX:
@@ -171,15 +175,25 @@ void rfSetMode(mode m, uint8_t frequency)
         // Enable the receive pipe
         rfWriteRegister(EN_RXADDR, ERX_P0);
         // Set a data rate of 1Mbps
+        // Set Low Noise Amplifier gain to reduce current consumption
+        // Set output power of power amplifier to 0dBm
         rfWriteRegister(RF_SETUP, RF_PWR_0DBM | LNA_HCURR);
-        // Set the payload length for RX in data pipe 0
-        rfWriteRegister(RX_PW_P0, 4);
+        // 2. Use dynamic payload length
+        // Auto acknowledgement is set for all pipes by default
+        // Enable DPL for all available pipes 0 - 5
+        rfWriteRegister(DYNPD, 0x1F);
         // Power up the device and put it in primary receive mode
         // Not using any interrupts. Disable all interrupts with 0x70
         rfWriteRegister(CONFIG, 0x70 | PWR_UP | PRIM_RX | EN_CRC);
         chipEnable();
         break;
     case TX:
+        // Transmit only requires DPL for pipe 0 to be enabled
+        // 2. Use dynamic payload length
+        // Enable auto acknowledgement for pipe 0
+        rfWriteRegister(EN_AA, ENAA_P0);
+        // Enable DPL for pipe 0
+        rfWriteRegister(DYNPD, DPL_P0);
         // Set reset count 0 to disable auto retransmit
         rfWriteRegister(SETUP_RETR, 0);
         // Set a data rate of 1Mbps
@@ -191,7 +205,7 @@ void rfSetMode(mode m, uint8_t frequency)
     }
 }
 
-void initNrf24l01(uint32_t address)
+void initNrf24l01()
 {
     initSpi1(USE_SSI1_RX);
     selectPinPushPullOutput(CSN);
@@ -199,18 +213,14 @@ void initNrf24l01(uint32_t address)
     // Run at 8Mbps
     setSpi1BaudRate(5e6, 40e6);
     setSpi1Mode(0, 0);
-
-    // Only use one data pipe to transmit data
-    rfSetAddress(RX_ADDR_P0, address);
-    rfSetAddress(TX_ADDR, address);
 }
 
 /*
- * Return true if any of the data pipes have data
+ * Return true if any of the data pipes have received data.
  */
 bool rfIsDataAvailable()
 {
-    return (((rfReadRegister(STATUS) >> 1) & 7) == 0);
+    return (((rfReadRegister(STATUS) >> 1) & RX_P_NO) != RX_P_NO);
 }
 
 void rfReceiveBuffer(uint8_t buffer[], uint8_t nBytes)
