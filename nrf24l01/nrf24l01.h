@@ -29,6 +29,7 @@
 #define FLUSH_TX            0xE1
 #define FLUSH_RX            0xE2
 #define ACTIVATE            0x50
+#define R_RX_PL_WID         0x60
 #define W_TX_PAYLOAD_NO_ACK 0xB0
 #define NOP                 0xFF
 
@@ -55,6 +56,6 @@ void rfSetMode(mode m, uint8_t frequency);
 
 bool rfIsDataAvailable();
 void rfSendBuffer(uint8_t buffer[], uint8_t nBytes);
-void rfReceiveBuffer(uint8_t buffer[], uint8_t nBytes);
+uint32_t rfReceiveBuffer(uint8_t buffer[]);
 
 #endif /* NRF24L01_H_ */

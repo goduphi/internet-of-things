@@ -223,13 +223,22 @@ bool rfIsDataAvailable()
     return (((rfReadRegister(STATUS) >> 1) & RX_P_NO) != RX_P_NO);
 }
 
-void rfReceiveBuffer(uint8_t buffer[], uint8_t nBytes)
+uint32_t rfReceiveBuffer(uint8_t buffer[])
 {
+    uint32_t receivedBytes = 0;
+    rfCsOff();
+    // Read in 2 bytes of data for the length of payload
+    writeSpi1Data(R_RX_PL_WID);
+    readSpi1Data();
+    writeSpi1Data(NOP);
+    receivedBytes = readSpi1Data();
+    rfCsOn();
+
     rfCsOff();
     writeSpi1Data(R_RX_PAYLOAD);
     readSpi1Data();
     uint8_t i = 0;
-    for(i = 0; i < nBytes; i++)
+    for(i = 0; i < receivedBytes; i++)
     {
         writeSpi1Data(NOP);
         buffer[i] = readSpi1Data();
@@ -238,6 +247,8 @@ void rfReceiveBuffer(uint8_t buffer[], uint8_t nBytes)
     writeSpi1Data(FLUSH_RX);
     readSpi1Data();
     rfCsOn();
+
+    return receivedBytes;
 }
 
 void rfSendBuffer(uint8_t buffer[], uint8_t nBytes)

@@ -47,7 +47,7 @@ int main(void)
 
     // These are used for testing only
     char out[50];
-    uint8_t buffer[4];
+    uint8_t buffer[32];
 
 	while(true)
 	{
@@ -75,15 +75,21 @@ int main(void)
 	        {
 	            buffer[i] = getInteger(&data, data.fieldPosition[1 + i]);
 	        }
-	        rfSendBuffer(buffer, 4);
+	        rfSendBuffer(buffer, data.fieldCount - 1);
 	    }
 #else
 	    if(rfIsDataAvailable())
 	    {
 	        putsUart0("There is data in the receive FIFO\n");
-	        rfReceiveBuffer(buffer, 4);
-	        sprintf(out, "RX = %x-%x-%x-%x\n", buffer[0], buffer[1], buffer[2], buffer[3]);
+	        uint32_t n = rfReceiveBuffer(buffer);
+	        sprintf(out, "Received %d bytes of data\n", n);
             putsUart0(out);
+	        uint8_t i = 0;
+	        for(i = 0; i < n; i++)
+	        {
+	            sprintf(out, "Data[%d] = %d\n", i, buffer[i]);
+                putsUart0(out);
+	        }
 	    }
 #endif
 	}
