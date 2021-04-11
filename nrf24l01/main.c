@@ -64,7 +64,7 @@ int main(void)
 	    if(isCommand(&data, "send", 0))
 	    {
 	        uint8_t i = 0;
-	        for(i = 0; i < data.fieldCount; i++)
+	        for(i = 0; i < data.fieldCount - 1; i++)
 	        {
 	            buffer[i] = getInteger(&data, data.fieldPosition[1 + i]);
 	        }

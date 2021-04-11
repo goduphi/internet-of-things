@@ -3,6 +3,12 @@
  *
  *  Created on: Apr 6, 2021
  *      Author: Sarker Nadir Afridi Azmi
+ * Notes
+ * -----
+ * Page: 27, 7.4.1
+ * The length of the data received is set by RX_PW_P0. This needs
+ * to be the same the amount of data being sent.
+ * TX_FIFO length = RX_PW_P0 length for static payload length.
  *
  */
 
@@ -25,7 +31,9 @@
 #define SETUP_RETR          0x04
 #define RF_CH               0x05
 #define RF_SETUP            0x06
-
+#define RF_DR                       0x08
+#define RF_PWR_0DBM                 0x06
+#define LNA_HCURR                   0x01
 #define STATUS              0x07
 #define RX_P_NO                     0x07
 #define OBSERVE_TX          0x08
@@ -50,9 +58,6 @@
 #define EN_DPL                      0x04
 
 #define MAX_ADDRESS_LENGTH  4
-#define MAX_DATA_BYTES      32
-
-uint8_t rxBuffer[MAX_DATA_BYTES];
 
 void chipEnable()
 {
@@ -151,14 +156,6 @@ void rfSetAddress(uint8_t pipe, uint32_t address)
     rfCsOn();
 }
 
-/*
- * Return true if any of the data pipes have data
- */
-bool rfIsDataAvailable()
-{
-    return (((rfReadRegister(STATUS) >> 1) & 7) == 0);
-}
-
 void rfSetMode(mode m, uint8_t frequency)
 {
     // This is an error as the frequency cannot be more than 2.52GHz
@@ -174,14 +171,11 @@ void rfSetMode(mode m, uint8_t frequency)
         // Enable the receive pipe
         rfWriteRegister(EN_RXADDR, ERX_P0);
         // Set a data rate of 1Mbps
-        rfWriteRegister(RF_SETUP, 7);
+        rfWriteRegister(RF_SETUP, RF_PWR_0DBM | LNA_HCURR);
         // Set the payload length for RX in data pipe 0
-        // Enable auto acknowledgement on data pipe 0
-        rfWriteRegister(EN_AA, ENAA_P0);
-        rfWriteRegister(FEATURE, EN_DPL);
-        rfWriteRegister(DYNPD, DPL_P0);
-        rfWriteRegister(RX_PW_P0, 32);
+        rfWriteRegister(RX_PW_P0, 4);
         // Power up the device and put it in primary receive mode
+        // Not using any interrupts. Disable all interrupts with 0x70
         rfWriteRegister(CONFIG, 0x70 | PWR_UP | PRIM_RX | EN_CRC);
         chipEnable();
         break;
@@ -189,12 +183,9 @@ void rfSetMode(mode m, uint8_t frequency)
         // Set reset count 0 to disable auto retransmit
         rfWriteRegister(SETUP_RETR, 0);
         // Set a data rate of 1Mbps
-        rfWriteRegister(RF_SETUP, 7);
-        // Enable auto acknowledgement on data pipe 0
-        rfWriteRegister(EN_AA, ENAA_P0);
-        rfWriteRegister(FEATURE, EN_DPL);
-        rfWriteRegister(DYNPD, DPL_P0);
+        rfWriteRegister(RF_SETUP, RF_PWR_0DBM | LNA_HCURR);
         // Power up the device
+        // Not using any interrupts. Disable all interrupts with 0x70
         rfWriteRegister(CONFIG, 0x70 | PWR_UP | EN_CRC);
         break;
     }
@@ -212,6 +203,14 @@ void initNrf24l01(uint32_t address)
     // Only use one data pipe to transmit data
     rfSetAddress(RX_ADDR_P0, address);
     rfSetAddress(TX_ADDR, address);
+}
+
+/*
+ * Return true if any of the data pipes have data
+ */
+bool rfIsDataAvailable()
+{
+    return (((rfReadRegister(STATUS) >> 1) & 7) == 0);
 }
 
 void rfReceiveBuffer(uint8_t buffer[], uint8_t nBytes)
