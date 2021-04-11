@@ -2,7 +2,7 @@
  * spi1.h
  *
  *  Created on: Mar 26, 2021
- *      Author: afrid
+ *      Author: Sarker Nadir Afridi Azmi
  */
 
 #ifndef SPI1_H_

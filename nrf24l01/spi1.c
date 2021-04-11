@@ -2,7 +2,7 @@
  * spi1.c
  *
  *  Created on: Mar 26, 2021
- *      Author: afrid
+ *      Author: Sarker Nadir Afridi Azmi
  */
 
 #include <stdint.h>

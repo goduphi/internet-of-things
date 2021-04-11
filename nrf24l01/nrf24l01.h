@@ -3,6 +3,14 @@
  *
  *  Created on: Mar 25, 2021
  *      Author: Sarker Nadir Afridi Azmi
+ *
+ * Pinout
+ * ------
+ * CE       (PD6)
+ * CSN      (PD1)
+ * SCK      (PD1)
+ * MOSI     (PD3)
+ * MISO     (PD2)
  */
 
 #include <stdint.h>

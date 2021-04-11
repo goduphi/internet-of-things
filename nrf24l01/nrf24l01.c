@@ -3,6 +3,7 @@
  *
  *  Created on: Apr 6, 2021
  *      Author: Sarker Nadir Afridi Azmi
+ *
  */
 
 #include <stdint.h>
@@ -24,6 +25,7 @@
 #define SETUP_RETR          0x04
 #define RF_CH               0x05
 #define RF_SETUP            0x06
+
 #define STATUS              0x07
 #define RX_P_NO                     0x07
 #define OBSERVE_TX          0x08
