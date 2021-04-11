@@ -13,14 +13,18 @@
 #include <stdbool.h>
 #include "uart0.h"
 
+static uint8_t count = 0;
+bool isCarriageReturn = false;
+
+// This code has been modified since our keyboard input is not interrupt driven
 // Gets a user defined string using the serial peripheral Uart0
 void getsUart0(USER_DATA* data)
 {
     // Keeps count of how many characters we currently have in the buffer
     // Also serves to provide us with the position of the last character input
-    uint8_t count = 0;
+    //uint8_t count = 0;
 
-    while(true)
+    //while(true)
     {
         char c = getcUart0();
 
@@ -33,17 +37,23 @@ void getsUart0(USER_DATA* data)
             // Else, we just look for new characters
             if(count > 0)
                 count--;
+            /*
             else
                 continue;
+            */
         }
         // If the character is a carriage return (13) or a line feed (10)
         else if(c == 13 || c == 10)
         {
             data->buffer[count] = 0;
+            count = 0;
+            isCarriageReturn = true;
             return;
         }
+        /*
         else if(c < 32)
             continue;
+        */
         // If the character is anything greater than a space
         else if(c >= 32)
         {
@@ -51,6 +61,8 @@ void getsUart0(USER_DATA* data)
             if(count == MAX_CHARS)
             {
                 data->buffer[count] = '\0';
+                count = 0;
+                isCarriageReturn = true;
                 return;
             }
         }
@@ -173,10 +185,10 @@ bool isCommand(USER_DATA* data, const char strCommand[], uint8_t minArguments)
     return false;
 }
 
-// Gets a pointer the requested integer field from the input
-int32_t getFieldInteger(USER_DATA* data, uint8_t fieldNumber)
+// Gets the requested integer field from the input
+uint32_t getFieldInteger(USER_DATA* data, uint8_t fieldNumber)
 {
-    int32_t sum = 0;
+    uint32_t sum = 0;
     if((fieldNumber < MAX_FIELDS) &&
        (fieldNumber < data->fieldCount) &&
        (data->fieldType[fieldNumber] == 'n'))
