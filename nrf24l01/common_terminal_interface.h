@@ -31,5 +31,6 @@ uint8_t getInteger(USER_DATA* data, uint8_t position);
 char* getFieldString(USER_DATA* data, uint8_t fieldNumber);
 bool stringCompare(const char string1[], const char string2[]);
 void strCpy(const char* str1, char* str2);
+uint32_t strLen(const char* str);
 
 #endif /* COMMON_TERMINAL_INTERFACE_H_ */

@@ -3,9 +3,13 @@
  *
  *  Created on: Apr 6, 2021
  *      Author: Sarker Nadir Afridi Azmi
+ *      Resource used: https://github.com/rohitdureja/Nordic-nRF24L01-RF-Driver
+ *                     The rfReceiveBuffer() code was taken from the above mentioned
+ *                     link.
  * Notes
  * -----
  * Page: 27, 7.4.1
+ * This is only applicable if dynamic payload length is not enabled.
  * The length of the data received is set by RX_PW_P0. This needs
  * to be the same the amount of data being sent.
  * TX_FIFO length = RX_PW_P0 length for static payload length.
@@ -174,10 +178,10 @@ void rfSetMode(mode m, uint8_t frequency)
         // Appendix B
         // Enable the receive pipe
         rfWriteRegister(EN_RXADDR, ERX_P0);
-        // Set a data rate of 1Mbps
+        // Set a data rate of 2Mbps
         // Set Low Noise Amplifier gain to reduce current consumption
         // Set output power of power amplifier to 0dBm
-        rfWriteRegister(RF_SETUP, RF_PWR_0DBM | LNA_HCURR);
+        rfWriteRegister(RF_SETUP, RF_DR | RF_PWR_0DBM | LNA_HCURR);
         // 2. Use dynamic payload length
         // Auto acknowledgement is set for all pipes by default
         // Enable DPL for all available pipes 0 - 5
@@ -185,6 +189,7 @@ void rfSetMode(mode m, uint8_t frequency)
         // Power up the device and put it in primary receive mode
         // Not using any interrupts. Disable all interrupts with 0x70
         rfWriteRegister(CONFIG, 0x70 | PWR_UP | PRIM_RX | EN_CRC);
+        rfCsOff();
         chipEnable();
         break;
     case TX:
@@ -195,9 +200,9 @@ void rfSetMode(mode m, uint8_t frequency)
         // Enable DPL for pipe 0
         rfWriteRegister(DYNPD, DPL_P0);
         // Set reset count 0 to disable auto retransmit
-        rfWriteRegister(SETUP_RETR, 0);
-        // Set a data rate of 1Mbps
-        rfWriteRegister(RF_SETUP, RF_PWR_0DBM | LNA_HCURR);
+        // Re-transmit 3 times with a 250us delay
+        // Set a data rate of 2Mbps
+        rfWriteRegister(RF_SETUP, RF_DR | RF_PWR_0DBM | LNA_HCURR);
         // Power up the device
         // Not using any interrupts. Disable all interrupts with 0x70
         rfWriteRegister(CONFIG, 0x70 | PWR_UP | EN_CRC);
@@ -226,6 +231,7 @@ bool rfIsDataAvailable()
 uint32_t rfReceiveBuffer(uint8_t buffer[])
 {
     uint32_t receivedBytes = 0;
+
     rfCsOff();
     // Read in 2 bytes of data for the length of payload
     writeSpi1Data(R_RX_PL_WID);
@@ -243,6 +249,7 @@ uint32_t rfReceiveBuffer(uint8_t buffer[])
         writeSpi1Data(NOP);
         buffer[i] = readSpi1Data();
     }
+
     // Clear the receive buffer
     writeSpi1Data(FLUSH_RX);
     readSpi1Data();
@@ -251,13 +258,17 @@ uint32_t rfReceiveBuffer(uint8_t buffer[])
     return receivedBytes;
 }
 
-void rfSendBuffer(uint8_t buffer[], uint8_t nBytes)
+void rfSendBuffer(uint8_t buffer[], uint32_t nBytes)
 {
     // Clear the transmit buffer
     rfCsOff();
     writeSpi1Data(FLUSH_TX);
     readSpi1Data();
     rfCsOn();
+
+    // Clear the MAX_RT interrupt flag
+    // This allows further transmission
+    rfWriteRegister(STATUS, 0x10);
 
     chipDisable();
     rfCsOff();
@@ -270,8 +281,9 @@ void rfSendBuffer(uint8_t buffer[], uint8_t nBytes)
         readSpi1Data();
     }
     rfCsOn();
-    rfWriteRegister(STATUS, 0);
+
     chipEnable();
-    _delay_cycles(10000);
+    // Pulse CE for more than 10us
+    _delay_cycles(20000);
     chipDisable();
 }

@@ -155,3 +155,11 @@ void strCpy(const char* str1, char* str2)
     str2[i] = '\0';
 }
 
+uint32_t strLen(const char* str)
+{
+    uint32_t i = 0;
+    while(str[i])
+        i++;
+    return i;
+}
+

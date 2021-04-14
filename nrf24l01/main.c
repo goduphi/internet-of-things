@@ -3,6 +3,9 @@
  *
  * Description: A simple protocol less application which can
  * send information wirelessly using the RF24L01 module.
+ *
+ * Target Board: Tiva C Series (TM4C123GH6PM)
+ * Stack Size: 4096
  */
 
 #include <stdint.h>
@@ -13,11 +16,36 @@
 #include "uart0.h"
 #include "common_terminal_interface.h"
 #include "nrf24l01.h"
+#include "wait.h"
+#include "timer0.h"
 #include <stdio.h>
 
 #define ADDRESS0    0xACCE55
 
 //#define REC
+
+#define SEND_LED    PORTF,2
+#define RECV_LED    PORTF,1
+
+void initHw()
+{
+    enablePort(PORTF);
+    selectPinPushPullOutput(SEND_LED);
+    selectPinPushPullOutput(RECV_LED);
+}
+
+uint8_t l = 0;
+
+void timer0Isr()
+{
+#ifndef REC
+    setPinValue(SEND_LED, getPinValue(SEND_LED) ^ 1);
+    char msg[] = "Id:0";
+    msg[3] = (l++%10) + '0';
+    rfSendBuffer((uint8_t*)&msg, strLen(msg));
+#endif
+    TIMER0_ICR_R = TIMER_ICR_TATOCINT;
+}
 
 int main(void)
 {
@@ -29,9 +57,9 @@ int main(void)
     rfSetAddress(TX_ADDR, ADDRESS0);
 
 #ifdef REC
-    rfSetMode(RX, 20);
+    rfSetMode(RX, 45);
 #else
-    rfSetMode(TX, 20);
+    rfSetMode(TX, 45);
 #endif
 
     initUart0();
@@ -41,55 +69,30 @@ int main(void)
     putsUart0("This board is in RX mode\n");
 #else
     putsUart0("This board is in TX mode\n");
-#endif
-
     USER_DATA data;
+#endif
 
     // These are used for testing only
     char out[50];
     uint8_t buffer[32];
 
+    initHw();
+    initTimer0(40e6);
+
 	while(true)
 	{
 #ifndef REC
-	    getsUart0(&data);
-	    parseField(&data);
-	    if(isCommand(&data, "status", 0))
-	    {
-	        sprintf(out, "Status = %d\n", rfReadRegister(getInteger(&data, data.fieldPosition[1])));
-	        putsUart0(out);
-	    }
-	    if(isCommand(&data, "addr", 0))
-	    {
-            rfReadIntoBuffer(0x0A, buffer, 4);
-            sprintf(out, "RX = %x-%x-%x-%x\n", buffer[0], buffer[1], buffer[2], buffer[3]);
-            putsUart0(out);
-            rfReadIntoBuffer(0x10, buffer, 4);
-            sprintf(out, "TX = %x-%x-%x-%x\n", buffer[0], buffer[1], buffer[2], buffer[3]);
-            putsUart0(out);
-	    }
-	    if(isCommand(&data, "send", 0))
-	    {
-	        uint8_t i = 0;
-	        for(i = 0; i < data.fieldCount - 1; i++)
-	        {
-	            buffer[i] = getInteger(&data, data.fieldPosition[1 + i]);
-	        }
-	        rfSendBuffer(buffer, data.fieldCount - 1);
-	    }
+
 #else
 	    if(rfIsDataAvailable())
 	    {
+	        setPinValue(RECV_LED, getPinValue(RECV_LED) ^ 1);
 	        putsUart0("There is data in the receive FIFO\n");
 	        uint32_t n = rfReceiveBuffer(buffer);
+	        buffer[n] = '\0';
 	        sprintf(out, "Received %d bytes of data\n", n);
             putsUart0(out);
-	        uint8_t i = 0;
-	        for(i = 0; i < n; i++)
-	        {
-	            sprintf(out, "Data[%d] = %d\n", i, buffer[i]);
-                putsUart0(out);
-	        }
+            putsUart0((char*)buffer);
 	    }
 #endif
 	}

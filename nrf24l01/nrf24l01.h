@@ -48,14 +48,11 @@ typedef enum _mode
 } mode;
 
 void initNrf24l01();
-void rfWriteRegister(uint8_t reg, uint8_t data);
-uint8_t rfReadRegister(uint8_t reg);
 void rfReadIntoBuffer(uint8_t reg, uint8_t buffer[], uint8_t nBytes);
 void rfSetAddress(uint8_t pipe, uint32_t address);
 void rfSetMode(mode m, uint8_t frequency);
-
 bool rfIsDataAvailable();
-void rfSendBuffer(uint8_t buffer[], uint8_t nBytes);
+void rfSendBuffer(uint8_t buffer[], uint32_t nBytes);
 uint32_t rfReceiveBuffer(uint8_t buffer[]);
 
 #endif /* NRF24L01_H_ */
